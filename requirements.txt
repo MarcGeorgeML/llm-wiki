@@ -4,5 +4,3 @@ easyocr
 numpy
 python-dotenv
 groq
-sentence_transformers
-chromadb

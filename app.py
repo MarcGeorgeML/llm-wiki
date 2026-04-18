@@ -18,14 +18,14 @@ from utils.utils import (
     build_question_prompt)
 
 
-
 # ── config ────────────────────────────────────────────────────────────────────
 WIKI_DIR   = Path("wiki")
 RAW_DIR    = Path("raw")
 WIKI_DIR.mkdir(exist_ok=True)
 RAW_DIR.mkdir(exist_ok=True)
-# ── UI ────────────────────────────────────────────────────────────────────────
 
+
+# ── UI ────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="LLM Wiki", page_icon="📖", layout="wide")
 st.title("📖 LLM Wiki")
 
@@ -42,6 +42,7 @@ tab_ingest, tab_query, tab_wiki = st.tabs(["Ingest PDFs", "Ask Questions", "Brow
 # ── TAB 1: INGEST ─────────────────────────────────────────────────────────────
 with tab_ingest:
     st.header("Add PDFs to the Wiki")
+    st.write("(Use Local Model for Ingestion)")
 
     uploaded = st.file_uploader("Upload one or more PDFs", type="pdf", accept_multiple_files=True)
 
@@ -105,6 +106,7 @@ with tab_ingest:
 # ── TAB 2: QUERY ──────────────────────────────────────────────────────────────
 with tab_query:
     st.header("Ask Questions")
+    st.write("(Use Cloud Model for Queries)")
 
     mode = st.radio("Mode", ["Type a question", "Upload a PDF with questions"], horizontal=True)
 
@@ -123,19 +125,21 @@ with tab_query:
     else:
         q_pdf = st.file_uploader("Upload PDF containing questions", type="pdf", key="qpdf")
         if st.button("Answer Questions", type="primary") and q_pdf:
-            
+            q_text = extract_pdf_text(q_pdf.read())
             prompt = build_question_prompt(
                 SCHEMA=SCHEMA,
                 WIKI_DIR=WIKI_DIR,
                 q_pdf=q_pdf,
-                QUESTION_PROMPT=QUESTION_PROMPT
+                QUESTION_PROMPT=QUESTION_PROMPT,
+                q_text=q_text
             )
             st.write_stream(stream(prompt))
 
 
 # ── TAB 3: BROWSE WIKI ────────────────────────────────────────────────────────
 with tab_wiki:
-    st.header("Browse Wiki")
+    st.header("Browse Wiki - Use Cloud Model to Browse Wiki")
+    st.write("(Use Cloud Model to Browse Wiki)")
 
     pages = get_wiki_pages(WIKI_DIR=WIKI_DIR)
     if not pages:

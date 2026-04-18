@@ -106,46 +106,46 @@ def write_wiki_pages(pages: list[dict], WIKI_DIR: Path):
             path.write_text(page["content"], encoding="utf-8")
 
 
-def load_wiki_context(WIKI_DIR: Path) -> str:
-    index_path = WIKI_DIR / "index.md"
-    if not index_path.exists():
-        return "(wiki is empty)"
-    index = index_path.read_text(encoding="utf-8")
-    pages = [f"--- {md.name} ---\n{md.read_text(encoding='utf-8')}"
-            for md in sorted(WIKI_DIR.glob("*.md"))
-            if md.name not in ("index.md", "log.md", "_last_response.txt")]
-    context = f"=== INDEX ===\n{index}\n\n=== PAGES ===\n\n" + "\n\n".join(pages)
-    if len(context) > 80000:
-        st.warning(f"Wiki is large ({len(context)} chars) — truncating to 80k. Consider clearing and starting fresh for a new subject.")
-        context = context[:80000]
-    return context
-
-# def load_relevant_wiki_context(WIKI_DIR: Path, question: str, max_pages: int = 5) -> str:
+# def load_wiki_context(WIKI_DIR: Path) -> str:
 #     index_path = WIKI_DIR / "index.md"
 #     if not index_path.exists():
 #         return "(wiki is empty)"
-    
 #     index = index_path.read_text(encoding="utf-8")
-    
-#     # find pages whose names appear in the question or index lines that match question words
-#     question_words = set(question.lower().split())
-#     scored = []
-#     for md in sorted(WIKI_DIR.glob("*.md")):
-#         if md.name in ("index.md", "log.md", "_last_response.txt"):
-#             continue
-#         name_words = set(md.stem.lower().replace("-", " ").replace("_", " ").split())
-#         score = len(question_words & name_words)
-#         scored.append((score, md))
-    
-#     # sort by relevance, take top N
-#     scored.sort(key=lambda x: x[0], reverse=True)
-#     top_pages = [md for _, md in scored[:max_pages]]
-    
-#     # always include at least the top pages even if score is 0
 #     pages = [f"--- {md.name} ---\n{md.read_text(encoding='utf-8')}"
-#             for md in top_pages]
-    
-#     return f"=== INDEX ===\n{index}\n\n=== RELEVANT PAGES ===\n\n" + "\n\n".join(pages)
+#             for md in sorted(WIKI_DIR.glob("*.md"))
+#             if md.name not in ("index.md", "log.md", "_last_response.txt")]
+#     context = f"=== INDEX ===\n{index}\n\n=== PAGES ===\n\n" + "\n\n".join(pages)
+#     if len(context) > 80000:
+#         st.warning(f"Wiki is large ({len(context)} chars) — truncating to 80k. Consider clearing and starting fresh for a new subject.")
+#         context = context[:80000]
+#     return context
+
+def load_relevant_wiki_context(WIKI_DIR: Path, question: str, max_pages: int = 5) -> str:
+    index_path = WIKI_DIR / "index.md"
+    if not index_path.exists():
+        return "(wiki is empty)"
+
+    index = index_path.read_text(encoding="utf-8")
+    question_words = set(question.lower().split())
+
+    scored = []
+    for md in sorted(WIKI_DIR.glob("*.md")):
+        if md.name in ("index.md", "log.md", "_last_response.txt"):
+            continue
+        content = md.read_text(encoding="utf-8").lower()
+        name_words = set(md.stem.lower().replace("-", " ").replace("_", " ").split())
+        # score on both page name and page content
+        name_score = len(question_words & name_words) * 2  # name match weighted higher
+        content_score = sum(1 for w in question_words if w in content)
+        scored.append((name_score + content_score, md))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_pages = [md for _, md in scored[:max_pages]]
+
+    pages = [f"--- {md.name} ---\n{md.read_text(encoding='utf-8')}"
+            for md in top_pages]
+
+    return f"=== INDEX ===\n{index}\n\n=== RELEVANT PAGES ===\n\n" + "\n\n".join(pages)
 
 
 def get_wiki_pages(WIKI_DIR: Path) -> list[Path]:
@@ -201,7 +201,7 @@ def build_query_prompt(SCHEMA: str, WIKI_DIR: Path, question: str, QUERY_PROMPT:
 
 ---
 WIKI CONTENT (this is ALL you know — do not use outside knowledge):
-{load_wiki_context(WIKI_DIR=WIKI_DIR)}
+{load_relevant_wiki_context(WIKI_DIR=WIKI_DIR, question=question)}
 
 ---
 QUESTION: {question}
@@ -212,18 +212,18 @@ QUESTION: {question}
     return prompt
 
 
-def build_question_prompt(SCHEMA: str, WIKI_DIR: Path, q_pdf: Any, QUESTION_PROMPT: str) -> str:
+def build_question_prompt(SCHEMA: str, WIKI_DIR: Path, q_pdf: Any, QUESTION_PROMPT: str, q_text: str) -> str:
     prompt = f"""
 {SCHEMA}
 
 ---
 WIKI CONTENT (this is ALL you know — do not use outside knowledge):
-{load_wiki_context(WIKI_DIR=WIKI_DIR)}
+{load_relevant_wiki_context(WIKI_DIR=WIKI_DIR, question=q_text)}
 
 ===
 {QUESTION_PROMPT}
 
 ---
 QUESTION DOCUMENT ({q_pdf.name}):
-{extract_pdf_text(q_pdf.read())[:40000]}"""
+{q_text[:40000]}"""
     return prompt
