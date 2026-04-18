@@ -1,0 +1,6 @@
+pymupdf
+streamlit
+easyocr
+numpy
+python-dotenv
+groq

@@ -1,58 +1,71 @@
-# LLM Wiki (local, Ollama + Gemma 3)
+# LLM Wiki (Streamlit)
 
-Personal knowledge base that compounds. Based on Karpathy's llm-wiki pattern.
+A small Streamlit app that ingests PDFs into a markdown wiki and answers
+questions using either a local Ollama model or the Groq cloud API.
 
-## Setup
+## Overview
+- Entrypoint: `app.py` — Streamlit UI with three tabs: Ingest PDFs, Ask Questions, Browse Wiki.
+- Core logic: `utils/utils.py` — PDF extraction (pymupdf + EasyOCR), model streaming adapters, parsing/writing wiki files.
+- LLM instructions: `schema.py` — strict schema used when ingesting and answering.
+- Wiki folder: `wiki/` (contains `index.md`, `log.md`, and content pages). Raw PDFs are stored in `raw/`.
 
+## Requirements
+- Python 3.8+
+- See `requirements.txt` (includes `pymupdf`, `streamlit`, `easyocr`, `numpy`, `python-dotenv`, `groq`).
+
+## Environment variables
+- `GROQ_API_KEY` — Groq API key (for cloud streaming).
+- `GROQ_MODEL` — optional Groq model id (defaults to `llama-3.3-70b-versatile`).
+- `OLLAMA_URL` — Ollama server URL (default: `http://localhost:11434/api/chat`).
+- `MODEL` — Ollama model name (default set in `utils/utils.py`).
+
+## Install
 ```bash
-pip install pymupdf
+pip install -r requirements.txt
 ```
 
-Ollama must be running with your model pulled:
+If using Ollama locally:
 ```bash
-ollama pull gemma3
+ollama pull <model-name>
 ollama serve
 ```
 
-If your model has a different name, edit the `MODEL` variable at the top of both scripts.
-
-## Usage
-
-### 1. Ingest a PDF
+## Run
+Start the Streamlit app:
 ```bash
-python ingest.py raw/mynotes.pdf
-```
-The LLM reads it and writes/updates markdown pages in `wiki/`.
-
-### 2. Ask a question
-```bash
-python query.py "what is the difference between X and Y?"
+streamlit run app.py
 ```
 
-### 3. Answer questions inside a PDF
-```bash
-python query.py --pdf raw/exam_questions.pdf
+On Windows (PowerShell) set env vars and run:
+```powershell
+$env:GROQ_API_KEY = "your_key_here"
+$env:OLLAMA_URL = "http://localhost:11434/api/chat"
+streamlit run app.py
 ```
 
-### Switching subjects
-Delete everything in `wiki/` and `raw/`. That's it.
-Optionally back up first: `cp -r wiki/ wiki_backup_subject1/`
-
-## Structure
-
-```
-llm-wiki/
-├── schema.md        ← tells the LLM how to behave (edit this to tune it)
-├── ingest.py        ← reads PDF, updates wiki
-├── query.py         ← asks questions against wiki
-├── raw/             ← put your PDFs here
-└── wiki/
-    ├── index.md     ← master list of all pages (auto-maintained)
-    ├── log.md       ← history of ingests
-    └── *.md         ← one page per concept (LLM writes these)
+On Windows (cmd):
+```cmd
+set GROQ_API_KEY=your_key_here
+set OLLAMA_URL=http://localhost:11434/api/chat
+streamlit run app.py
 ```
 
-## Notes
-- First ingest will be slow — Gemma 3 is doing real work
-- If a response looks broken, check `wiki/_last_response.txt`
-- The wiki folder is just markdown files — open in Obsidian for graph view
+UI flow:
+- Ingest PDFs — upload PDF(s); LLM writes `wiki/*.md` and appends `wiki/log.md`; raw PDFs saved in `raw/`.
+- Ask Questions — queries use only wiki content and enforce citations.
+- Browse Wiki — view rendered markdown pages.
+
+## Behavior notes & caveats
+- OCR GPU: `easyocr.Reader(['en'], gpu=True)` may fail or be slow without a GPU — set `gpu=False` in `utils/utils.py` if needed.
+- Parsing: `parse_pages` expects model output in `===FILE: ... ===` / `===END===` blocks. Malformed output falls back to a single saved page; check `wiki/_last_response.txt`.
+- Context size: `load_wiki_context` truncates to ~80k chars for large wikis; long wikis will be cut.
+- Path safety: `write_wiki_pages` checks output paths and will skip suspicious paths.
+- Note: older README references `ingest.py`/`query.py` which are not present; current entrypoint is `app.py`.
+
+## Troubleshooting
+- Ingest failures: inspect `wiki/_last_response.txt` for raw model output.
+- EasyOCR install errors: try CPU mode or install appropriate CUDA drivers for your GPU.
+- Ollama: ensure `ollama serve` is running and `MODEL` matches a pulled model.
+
+## Contributing / Next steps
+- Consider toggling EasyOCR GPU option, improving `parse_pages` robustness, or adding unit tests for parsing/writing.

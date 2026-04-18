@@ -1,17 +1,16 @@
 from datetime import date
 from pathlib import Path
 import streamlit as st
+import shutil
 from dotenv import load_dotenv
 load_dotenv()
 
 from schema import SCHEMA
-from utils.utils import ask_ollama_stream, extract_pdf_text, parse_pages, write_wiki_pages, load_wiki_context, get_wiki_pages, ask_gemini_stream
+from utils.utils import ask_ollama_stream, extract_pdf_text, parse_pages, write_wiki_pages, load_wiki_context, get_wiki_pages, ask_groq_stream
 
 
 
 # ── config ────────────────────────────────────────────────────────────────────
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL      = "gemma3:12b"
 WIKI_DIR   = Path("wiki")
 RAW_DIR    = Path("raw")
 WIKI_DIR.mkdir(exist_ok=True)
@@ -21,11 +20,11 @@ RAW_DIR.mkdir(exist_ok=True)
 st.set_page_config(page_title="LLM Wiki", page_icon="📖", layout="wide")
 st.title("📖 LLM Wiki")
 
-model_choice = st.radio("Model", ["Local (Ollama)", "Cloud (Gemini Flash)"], horizontal=True)
+model_choice = st.radio("Model", ["Local (Ollama)", "Cloud (llama-3.3-70b-versatile)"], horizontal=True)
 
 def stream(prompt: str):
-    if model_choice == "Cloud (Gemini Flash)":
-        yield from ask_gemini_stream(prompt)
+    if model_choice == "Cloud (llama-3.3-70b-versatile)":
+        yield from ask_groq_stream(prompt)
     else:
         yield from ask_ollama_stream(prompt)
 
@@ -38,7 +37,7 @@ with tab_ingest:
     uploaded = st.file_uploader("Upload one or more PDFs", type="pdf", accept_multiple_files=True)
 
     if st.button("🔄 Clear Wiki (switch subject)", type="secondary"):
-        import shutil
+
         shutil.rmtree(WIKI_DIR)
         WIKI_DIR.mkdir()
         st.success("Wiki cleared. Ready for a new subject.")
@@ -73,32 +72,37 @@ CONTENT:
 {text}
 
 ---
-Write all wiki pages to create or update. Wrap each file exactly like:
+OUTPUT FORMAT — you must follow this exactly or you have failed:
+Every file must be wrapped like this with no exceptions:
 
 ===FILE: wiki/PageName.md===
 [full markdown content]
 ===END===
 
-Include wiki/index.md and wiki/log.md using the same format.
-Today's date: {date.today().isoformat()}
-Output ONLY the file blocks. Nothing else."""
+Rules:
+- Start your response with ===FILE: immediately, no preamble
+- Every file block must end with ===END===
+- Include wiki/index.md and wiki/log.md
+- Output NOTHING outside the file blocks. No explanations. No commentary.
 
-                st.write("Asking Gemma 3...")
+Today's date: {date.today().isoformat()}"""
+
+                st.write("Asking LLM...")
                 response = "".join(stream(prompt))
-                pages = parse_pages(response)
+                pages = parse_pages(response, filename=up_file.name)
 
                 if not pages:
                     (WIKI_DIR / "_last_response.txt").write_text(response, encoding="utf-8")
                     status.update(label=f"❌ {up_file.name} — parse failed, check _last_response.txt", state="error")
                 else:
-                    write_wiki_pages(pages)
+                    write_wiki_pages(pages, WIKI_DIR)
                     up_file.seek(0)
                     (RAW_DIR / up_file.name).write_bytes(pdf_bytes)
                     status.update(label=f"✅ {up_file.name} — {len(pages)} pages written", state="complete")
 
     st.divider()
     st.subheader("Current Wiki Pages")
-    pages = get_wiki_pages()
+    pages = get_wiki_pages(WIKI_DIR=WIKI_DIR)
     if pages:
         for p in pages:
             st.write(f"- `{p.name}`")
@@ -119,7 +123,7 @@ with tab_query:
 
 ---
 WIKI CONTENT (this is ALL you know — do not use outside knowledge):
-{load_wiki_context()}
+{load_wiki_context(WIKI_DIR=WIKI_DIR)}
 
 ---
 QUESTION: {question}
@@ -136,7 +140,7 @@ Do not use outside knowledge under any circumstances."""
 
 ---
 WIKI CONTENT (this is ALL you know — do not use outside knowledge):
-{load_wiki_context()}
+{load_wiki_context(WIKI_DIR=WIKI_DIR)}
 
 ---
 The document below contains questions. Answer EACH question using ONLY the wiki above.
@@ -153,7 +157,7 @@ QUESTION DOCUMENT ({q_pdf.name}):
 with tab_wiki:
     st.header("Browse Wiki")
 
-    pages = get_wiki_pages()
+    pages = get_wiki_pages(WIKI_DIR=WIKI_DIR)
     if not pages:
         st.info("Wiki is empty. Go to Ingest to add PDFs.")
     else:

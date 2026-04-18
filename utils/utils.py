@@ -4,29 +4,32 @@ import urllib.request
 import os
 from pathlib import Path
 import pymupdf as fitz
-from google import genai
 import streamlit as st
+import easyocr
+from groq import Groq
+import numpy as np
 from dotenv import load_dotenv
+
+reader = easyocr.Reader(['en'], gpu=True)
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL   = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/chat")
+MODEL = os.getenv("MODEL", "gemma3:12b")
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL      = "gemma3"
-WIKI_DIR   = Path("wiki")
-RAW_DIR    = Path("raw")
-WIKI_DIR.mkdir(exist_ok=True)
-RAW_DIR.mkdir(exist_ok=True)
-
-def ask_gemini_stream(prompt: str):
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    for chunk in client.models.generate_content_stream(
-        model=GEMINI_MODEL,
-        contents=prompt
-    ):
-        if chunk.text:
-            yield chunk.text
+def ask_groq_stream(prompt: str):
+    
+    client = Groq(api_key=GROQ_API_KEY)
+    stream = client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        stream=True
+    )
+    for chunk in stream:
+        text = chunk.choices[0].delta.content
+        if text:
+            yield text
 
 
 def ask_ollama_stream(prompt: str):
@@ -42,23 +45,29 @@ def ask_ollama_stream(prompt: str):
 
 def extract_pdf_text(pdf_bytes: bytes) -> str:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    return "\n".join(str(page.get_text()) for page in doc)
+    pages_text = []
+    for page in doc:
+        normal = str(page.get_text()).strip()
+        if normal:
+            pages_text.append(normal)
+        else:
+            pix = page.get_pixmap(dpi=300)
+            img_bytes = pix.tobytes("png")
+            result = reader.readtext(np.frombuffer(img_bytes, dtype=np.uint8), detail=0)
+            lines: list[str] = []
+            for item in result:
+                if isinstance(item, str):
+                    lines.append(item)
+                elif isinstance(item, (list, tuple)):
+                    lines.extend(str(v) for v in item if isinstance(v, str))
+            ocr = "\n".join(lines).strip()
+            if ocr:
+                pages_text.append(ocr)
+    return "\n".join(pages_text)
 
-
-def parse_pages(response: str) -> list[dict]:
-    # Strip anything before the first ===FILE: block
-    first = response.find("===FILE:")
-    if first != -1:
-        response = response[first:]
-    pattern = re.compile(r"===FILE:\s*(.+?)===\n(.*?)===END===", re.DOTALL)
-    return [{"path": m.group(1).strip(), "content": m.group(2).strip()}
-            for m in pattern.finditer(response)]
-
-
-def write_wiki_pages(pages: list[dict]):
+def write_wiki_pages(pages: list[dict], WIKI_DIR: Path):
     for page in pages:
         path = (Path.cwd() / page["path"]).resolve()
-        # Reject anything trying to escape the wiki directory
         if not str(path).startswith(str(WIKI_DIR.resolve())):
             st.warning(f"Skipped suspicious path: {page['path']}")
             continue
@@ -70,7 +79,7 @@ def write_wiki_pages(pages: list[dict]):
             path.write_text(page["content"], encoding="utf-8")
 
 
-def load_wiki_context() -> str:
+def load_wiki_context(WIKI_DIR: Path) -> str:
     index_path = WIKI_DIR / "index.md"
     if not index_path.exists():
         return "(wiki is empty)"
@@ -85,5 +94,27 @@ def load_wiki_context() -> str:
     return context
 
 
-def get_wiki_pages() -> list[Path]:
+def get_wiki_pages(WIKI_DIR: Path) -> list[Path]:
     return [p for p in sorted(WIKI_DIR.glob("*.md")) if p.name != "_last_response.txt"]
+
+def parse_pages(response: str, filename: str = "source") -> list[dict]:
+    first = response.find("===FILE:")
+    if first != -1:
+        response = response[first:]
+    pattern = re.compile(r"===FILE:\s*(.+?)===\n(.*?)===END===", re.DOTALL)
+    pages = [{"path": m.group(1).strip(), "content": m.group(2).strip()}
+            for m in pattern.finditer(response)]
+    if pages:
+        return pages
+    # Fallback: split on ===FILE: blocks without ===END===
+    pattern = re.compile(r"===FILE:\s*(.+?)===\n(.*?)(?====FILE:|\Z)", re.DOTALL)
+    pages = [{"path": m.group(1).strip(), "content": m.group(2).strip()}
+            for m in pattern.finditer(response)]
+    if pages:
+        return pages
+    # Last resort: model ignored format entirely, save whatever it wrote as a single page
+    stem = Path(filename).stem
+    return [
+        {"path": f"wiki/{stem}.md", "content": response.strip()},
+        {"path": "wiki/index.md",   "content": f"- [[{stem}]] — ingested from {filename}\n"},
+    ]
