@@ -1,3 +1,4 @@
+from datetime import date
 import json
 import re
 import urllib.request
@@ -8,6 +9,10 @@ import streamlit as st
 import easyocr
 from groq import Groq
 import numpy as np
+from PIL import Image
+import io
+import cv2
+from typing import Any
 from dotenv import load_dotenv
 
 reader = easyocr.Reader(['en'], gpu=True)
@@ -15,18 +20,27 @@ load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL   = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/chat")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 MODEL = os.getenv("MODEL", "gemma3:12b")
 
 def ask_groq_stream(prompt: str):
     
     client = Groq(api_key=GROQ_API_KEY)
-    stream = client.chat.completions.create(
+    completion = client.chat.completions.create(
         model=GROQ_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        stream=True
+        messages=[
+            {
+                "role": "user", 
+                "content": prompt
+            }
+        ],
+        temperature=1, # 0.2
+        max_completion_tokens=8192,
+        top_p=1,
+        stream=True,
+        stop=None
     )
-    for chunk in stream:
+    for chunk in completion:
         text = chunk.choices[0].delta.content
         if text:
             yield text
@@ -51,9 +65,22 @@ def extract_pdf_text(pdf_bytes: bytes) -> str:
         if normal:
             pages_text.append(normal)
         else:
-            pix = page.get_pixmap(dpi=300)
+            pix = page.get_pixmap(dpi=250)
             img_bytes = pix.tobytes("png")
-            result = reader.readtext(np.frombuffer(img_bytes, dtype=np.uint8), detail=0)
+            try:
+                img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+                img_arr = np.array(img)
+            except Exception:
+                try:
+                    img_arr = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
+                except Exception:
+                    img_arr = np.frombuffer(img_bytes, dtype=np.uint8)
+            try:
+                result = reader.readtext(img_arr, detail=0)
+            except Exception as e:
+                # log and skip OCR on this page if reader fails
+                st.warning(f"OCR failed on page: {e}")
+                result = []
             lines: list[str] = []
             for item in result:
                 if isinstance(item, str):
@@ -93,9 +120,37 @@ def load_wiki_context(WIKI_DIR: Path) -> str:
         context = context[:80000]
     return context
 
+# def load_relevant_wiki_context(WIKI_DIR: Path, question: str, max_pages: int = 5) -> str:
+#     index_path = WIKI_DIR / "index.md"
+#     if not index_path.exists():
+#         return "(wiki is empty)"
+    
+#     index = index_path.read_text(encoding="utf-8")
+    
+#     # find pages whose names appear in the question or index lines that match question words
+#     question_words = set(question.lower().split())
+#     scored = []
+#     for md in sorted(WIKI_DIR.glob("*.md")):
+#         if md.name in ("index.md", "log.md", "_last_response.txt"):
+#             continue
+#         name_words = set(md.stem.lower().replace("-", " ").replace("_", " ").split())
+#         score = len(question_words & name_words)
+#         scored.append((score, md))
+    
+#     # sort by relevance, take top N
+#     scored.sort(key=lambda x: x[0], reverse=True)
+#     top_pages = [md for _, md in scored[:max_pages]]
+    
+#     # always include at least the top pages even if score is 0
+#     pages = [f"--- {md.name} ---\n{md.read_text(encoding='utf-8')}"
+#             for md in top_pages]
+    
+#     return f"=== INDEX ===\n{index}\n\n=== RELEVANT PAGES ===\n\n" + "\n\n".join(pages)
+
 
 def get_wiki_pages(WIKI_DIR: Path) -> list[Path]:
     return [p for p in sorted(WIKI_DIR.glob("*.md")) if p.name != "_last_response.txt"]
+
 
 def parse_pages(response: str, filename: str = "source") -> list[dict]:
     first = response.find("===FILE:")
@@ -118,3 +173,57 @@ def parse_pages(response: str, filename: str = "source") -> list[dict]:
         {"path": f"wiki/{stem}.md", "content": response.strip()},
         {"path": "wiki/index.md",   "content": f"- [[{stem}]] — ingested from {filename}\n"},
     ]
+
+
+def build_ingest_prompt(chunk: str, filename: str, chunk_index: int, total_chunks: int, 
+                        index_md: str, schema: str, ingestion_prompt: str) -> str:
+    schema_block = schema if chunk_index == 0 else "You are a strict wiki maintainer. Same rules and format as before."
+    return f"""{schema_block}
+---
+CURRENT index.md:
+{index_md[:3000]}
+
+---
+
+SOURCE FILE: {filename} (part {chunk_index+1} of {total_chunks})
+CONTENT:
+{chunk}
+
+---
+{ingestion_prompt}
+
+Today's date: {date.today().isoformat()}"""
+
+
+def build_query_prompt(SCHEMA: str, WIKI_DIR: Path, question: str, QUERY_PROMPT: str) -> str:
+    prompt = f"""
+{SCHEMA}
+
+---
+WIKI CONTENT (this is ALL you know — do not use outside knowledge):
+{load_wiki_context(WIKI_DIR=WIKI_DIR)}
+
+---
+QUESTION: {question}
+
+---
+{QUERY_PROMPT}
+"""
+    return prompt
+
+
+def build_question_prompt(SCHEMA: str, WIKI_DIR: Path, q_pdf: Any, QUESTION_PROMPT: str) -> str:
+    prompt = f"""
+{SCHEMA}
+
+---
+WIKI CONTENT (this is ALL you know — do not use outside knowledge):
+{load_wiki_context(WIKI_DIR=WIKI_DIR)}
+
+===
+{QUESTION_PROMPT}
+
+---
+QUESTION DOCUMENT ({q_pdf.name}):
+{extract_pdf_text(q_pdf.read())[:40000]}"""
+    return prompt

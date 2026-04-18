@@ -34,3 +34,31 @@ STRICT RULES — you must follow these or you have failed:
 
 Use [[WikiLinks]] for cross-references. Keep pages focused.
 """
+
+QUERY_PROMPT = """
+Answer ONLY using the wiki content above. Cite every claim with (see [[PageName]]).
+If the information is not in the wiki, say exactly: "Not found in wiki."
+Do not use outside knowledge under any circumstances.
+"""
+
+INGESTION_PROMPT = """
+---
+OUTPUT FORMAT — you must follow this exactly or you have failed:
+Every file must be wrapped like this with no exceptions:
+
+===FILE: wiki/PageName.md===
+[full markdown content]
+===END===
+
+Rules:
+- Start your response with ===FILE: immediately, no preamble
+- Every file block must end with ===END===
+- Include wiki/index.md and wiki/log.md
+- Output NOTHING outside the file blocks. No explanations. No commentary.
+"""
+QUESTION_PROMPT = """
+---
+The document below contains questions. Answer EACH question using ONLY the wiki above.
+Number your answers. Write "Not found in wiki." for anything not covered.
+Do not use outside knowledge under any circumstances.
+"""

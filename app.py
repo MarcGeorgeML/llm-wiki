@@ -5,8 +5,17 @@ import shutil
 from dotenv import load_dotenv
 load_dotenv()
 
-from schema import SCHEMA
-from utils.utils import ask_ollama_stream, extract_pdf_text, parse_pages, write_wiki_pages, load_wiki_context, get_wiki_pages, ask_groq_stream
+from schema import SCHEMA, QUESTION_PROMPT, INGESTION_PROMPT, QUERY_PROMPT
+from utils.utils import (
+    ask_ollama_stream, 
+    extract_pdf_text, 
+    parse_pages, 
+    write_wiki_pages, 
+    get_wiki_pages, 
+    ask_groq_stream,
+    build_ingest_prompt,
+    build_query_prompt,
+    build_question_prompt)
 
 
 
@@ -37,7 +46,6 @@ with tab_ingest:
     uploaded = st.file_uploader("Upload one or more PDFs", type="pdf", accept_multiple_files=True)
 
     if st.button("🔄 Clear Wiki (switch subject)", type="secondary"):
-
         shutil.rmtree(WIKI_DIR)
         WIKI_DIR.mkdir()
         st.success("Wiki cleared. Ready for a new subject.")
@@ -53,52 +61,36 @@ with tab_ingest:
                     status.update(label=f"⚠️ {up_file.name} — no text found (scanned PDF?)", state="error")
                     continue
 
-                if len(text) > 60000:
-                    st.write(f"Large file — truncating to 60k chars ({len(text)} total)")
-                    text = text[:60000]
+                chunks = [text[i:i+20000] for i in range(0, len(text), 20000)]
+                st.write(f"Split into {len(chunks)} chunk(s)...")
 
-                index_md = (WIKI_DIR / "index.md").read_text(encoding="utf-8") \
-                    if (WIKI_DIR / "index.md").exists() else "(empty)"
+                for i, chunk in enumerate(chunks):
+                    st.write(f"Processing chunk {i+1}/{len(chunks)}...")
+                    index_md = (WIKI_DIR / "index.md").read_text(encoding="utf-8") \
+                        if (WIKI_DIR / "index.md").exists() else "(empty)"
 
-                prompt = f"""{SCHEMA}
+                    prompt = build_ingest_prompt(
+                        chunk=chunk,
+                        filename=up_file.name,
+                        chunk_index=i,
+                        total_chunks=len(chunks),
+                        index_md=index_md,
+                        schema=SCHEMA,
+                        ingestion_prompt=INGESTION_PROMPT
+                    )
 
----
-CURRENT index.md:
-{index_md}
+                    response = "".join(stream(prompt))
+                    pages = parse_pages(response, filename=up_file.name)
 
----
-SOURCE FILE: {up_file.name}
-CONTENT:
-{text}
+                    if not pages:
+                        (WIKI_DIR / "_last_response.txt").write_text(response, encoding="utf-8")
+                        st.warning(f"Chunk {i+1} parse failed — check _last_response.txt")
+                    else:
+                        write_wiki_pages(pages, WIKI_DIR)
+                        st.write(f"✅ Chunk {i+1}/{len(chunks)} — {len(pages)} pages written")
 
----
-OUTPUT FORMAT — you must follow this exactly or you have failed:
-Every file must be wrapped like this with no exceptions:
-
-===FILE: wiki/PageName.md===
-[full markdown content]
-===END===
-
-Rules:
-- Start your response with ===FILE: immediately, no preamble
-- Every file block must end with ===END===
-- Include wiki/index.md and wiki/log.md
-- Output NOTHING outside the file blocks. No explanations. No commentary.
-
-Today's date: {date.today().isoformat()}"""
-
-                st.write("Asking LLM...")
-                response = "".join(stream(prompt))
-                pages = parse_pages(response, filename=up_file.name)
-
-                if not pages:
-                    (WIKI_DIR / "_last_response.txt").write_text(response, encoding="utf-8")
-                    status.update(label=f"❌ {up_file.name} — parse failed, check _last_response.txt", state="error")
-                else:
-                    write_wiki_pages(pages, WIKI_DIR)
-                    up_file.seek(0)
-                    (RAW_DIR / up_file.name).write_bytes(pdf_bytes)
-                    status.update(label=f"✅ {up_file.name} — {len(pages)} pages written", state="complete")
+                (RAW_DIR / up_file.name).write_bytes(pdf_bytes)
+                status.update(label=f"✅ {up_file.name} — all chunks processed", state="complete")
 
     st.divider()
     st.subheader("Current Wiki Pages")
@@ -119,37 +111,25 @@ with tab_query:
     if mode == "Type a question":
         question = st.text_area("Your question", height=100)
         if st.button("Ask", type="primary") and question.strip():
-            prompt = f"""{SCHEMA}
-
----
-WIKI CONTENT (this is ALL you know — do not use outside knowledge):
-{load_wiki_context(WIKI_DIR=WIKI_DIR)}
-
----
-QUESTION: {question}
-
-Answer ONLY using the wiki content above. Cite every claim with (see [[PageName]]).
-If the information is not in the wiki, say exactly: "Not found in wiki."
-Do not use outside knowledge under any circumstances."""
-
+            
+            prompt = build_query_prompt(
+                SCHEMA=SCHEMA,
+                WIKI_DIR=WIKI_DIR,
+                question=question,
+                QUERY_PROMPT=QUERY_PROMPT
+            )
             st.write_stream(stream(prompt))
+            
     else:
         q_pdf = st.file_uploader("Upload PDF containing questions", type="pdf", key="qpdf")
         if st.button("Answer Questions", type="primary") and q_pdf:
-            prompt = f"""{SCHEMA}
-
----
-WIKI CONTENT (this is ALL you know — do not use outside knowledge):
-{load_wiki_context(WIKI_DIR=WIKI_DIR)}
-
----
-The document below contains questions. Answer EACH question using ONLY the wiki above.
-Number your answers. Write "Not found in wiki." for anything not covered.
-Do not use outside knowledge under any circumstances.
-
-QUESTION DOCUMENT ({q_pdf.name}):
-{extract_pdf_text(q_pdf.read())[:40000]}"""
-
+            
+            prompt = build_question_prompt(
+                SCHEMA=SCHEMA,
+                WIKI_DIR=WIKI_DIR,
+                q_pdf=q_pdf,
+                QUESTION_PROMPT=QUESTION_PROMPT
+            )
             st.write_stream(stream(prompt))
 
 
