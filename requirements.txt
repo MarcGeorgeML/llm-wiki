@@ -6,3 +6,6 @@ python-dotenv
 groq
 chromadb
 sentence-transformers
+python-multipart
+fastapi
+uvicorn[standard]
