@@ -1,8 +1,11 @@
-.env
-.venv/**
+backend/.env
+backend/.venv/**
 
 raw/**
 !raw!
 
 wiki/**
 !wiki!
+
+chroma_db/**
+!chroma_db!

@@ -74,7 +74,7 @@ Every page that exists in wiki/ must have exactly one entry. Nothing else.
 OUTPUT FORMAT — you must follow this exactly or you have failed:
 Every file must be wrapped like this with no exceptions:
 
-=== FILE: PageName ===
+=== FILE: [filename.pdf]PageName ===
 [full markdown content]
 === END ===
 
