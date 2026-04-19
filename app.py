@@ -1,4 +1,5 @@
-from datetime import date
+
+
 from pathlib import Path
 import streamlit as st
 import shutil
@@ -6,16 +7,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from schema import SCHEMA, QUESTION_PROMPT, INGESTION_PROMPT, QUERY_PROMPT
-from utils.utils import (
-    ask_ollama_stream, 
-    extract_pdf_text, 
-    parse_pages, 
-    write_wiki_pages, 
-    get_wiki_pages, 
-    ask_groq_stream,
-    build_ingest_prompt,
-    build_query_prompt,
-    build_question_prompt)
+from utils.pdf_utils import extract_pdf_text, parse_pages
+from utils.llm_utils import ask_groq_stream, ask_ollama_stream
+from utils.wiki_utils import get_wiki_pages, write_wiki_pages, clear_chroma
+from utils.prompt_utils import build_ingest_prompt, build_query_prompt, build_question_prompt
 
 
 # ── config ────────────────────────────────────────────────────────────────────
@@ -47,8 +42,9 @@ with tab_ingest:
     uploaded = st.file_uploader("Upload one or more PDFs", type="pdf", accept_multiple_files=True)
 
     if st.button("🔄 Clear Wiki (switch subject)", type="secondary"):
-        shutil.rmtree(WIKI_DIR)
+        shutil.rmtree(str(WIKI_DIR))
         WIKI_DIR.mkdir()
+        clear_chroma()
         st.success("Wiki cleared. Ready for a new subject.")
 
     if uploaded and st.button("📥 Ingest Selected PDFs", type="primary"):
@@ -103,7 +99,7 @@ with tab_ingest:
         st.info("No wiki pages yet. Ingest a PDF to get started.")
 
 
-# ── TAB 2: QUERY ──────────────────────────────────────────────────────────────
+# ── TAB 2: QnA ──────────────────────────────────────────────────────────────
 with tab_query:
     st.header("Ask Questions")
     st.write("(Use Cloud Model for Queries)")
@@ -138,8 +134,7 @@ with tab_query:
 
 # ── TAB 3: BROWSE WIKI ────────────────────────────────────────────────────────
 with tab_wiki:
-    st.header("Browse Wiki - Use Cloud Model to Browse Wiki")
-    st.write("(Use Cloud Model to Browse Wiki)")
+    st.header("Browse Wiki Pages")
 
     pages = get_wiki_pages(WIKI_DIR=WIKI_DIR)
     if not pages:
