@@ -1,7 +1,5 @@
 from pathlib import Path
 import shutil
-from chromadb.api import ClientAPI
-from services.ingestion import IngestionService
 
 class ClearWikiService:
 
@@ -9,7 +7,7 @@ class ClearWikiService:
         self.WIKI_DIR = WIKI_DIR
         self.RAW_DIR  = RAW_DIR
 
-    def execute(self, chroma_client: ClientAPI, ingestion_service: IngestionService) -> dict:
+    def execute(self) -> dict:
         if self.WIKI_DIR.exists():
             shutil.rmtree(self.WIKI_DIR)
         self.WIKI_DIR.mkdir()
@@ -17,9 +15,5 @@ class ClearWikiService:
         # if self.RAW_DIR.exists():
         #     shutil.rmtree(self.RAW_DIR)
         # self.RAW_DIR.mkdir()
-
-        chroma_client.delete_collection("wiki")
-        new_collection = chroma_client.get_or_create_collection("wiki")
-        ingestion_service.collection = new_collection
 
         return {"status": "cleared"}

@@ -1,80 +1,96 @@
-# LLM Wiki (Streamlit)
+# llm-wiki
 
-A small Streamlit app that ingests PDFs into a markdown wiki and answers
-questions using either a local Ollama model or the Groq cloud API.
+**Overview**
 
-## Overview
-- Entrypoint: `app.py` — Streamlit UI with three tabs: Ingest PDFs, Ask Questions, Browse Wiki.
-- Core logic: `utils/utils.py` — PDF extraction (pymupdf + EasyOCR), model streaming adapters (`ask_ollama_stream`, `ask_groq_stream`), parsing/writing wiki files, and prompt builders.
-- LLM instructions: `schema.py` — strict schema used when ingesting and answering (`SCHEMA`, `INGESTION_PROMPT`, `QUERY_PROMPT`, `QUESTION_PROMPT`).
-- Wiki folder: `wiki/` (contains `index.md`, `log.md`, `_last_response.txt`, and content pages). Raw PDFs are stored in `raw/`.
+llm-wiki is a document ingestion and question-answering project that extracts content from PDFs, converts them into structured markdown wiki pages, and indexes those pages into a persistent Chroma vector store for retrieval. The repository is focused on the backend ingestion pipeline implemented with FastAPI. The ingestion phase (PDF -> wiki pages -> Chroma index) is implemented and functional.
 
-## Requirements
-- Python 3.8+
-- See `requirements.txt` for dependencies (e.g. `pymupdf`, `streamlit`, `easyocr`, `numpy`, `python-dotenv`, `groq`).
+**Status**
 
-## Environment variables (defaults coming from `utils/utils.py`)
-- `GROQ_API_KEY` — Groq API key (for cloud streaming).
-- `GROQ_MODEL` — optional Groq model id (defaults to `llama-3.3-70b-versatile`).
-- `OLLAMA_URL` — Ollama server URL (default: `http://localhost:11434/api/generate`).
-- `MODEL` — Ollama model name (default: `gemma3:12b`).
+- **Completed:** Ingestion pipeline (upload or place PDFs -> extract -> chunk -> LLM-driven page extraction -> write markdown pages -> index into Chroma).
+- **In progress / Not provided here:** Query UI and a production front-end. The canonical backend services and helpers for querying and prompt building exist but the frontend is not bundled as the primary entrypoint.
 
-## Install
+**Architecture (high level)**
+
+- **Input:** PDF files placed into the `raw/` directory or uploaded via the API.
+- **Processing:** `backend/services/ingestion.py` (PDF extraction, chunking, building ingestion prompts, streaming LLM output, parsing JSON page objects, writing markdown pages, indexing to Chroma).
+- **Storage:** Generated markdown pages are saved to `wiki/` and vector embeddings are stored in `chroma_db/`.
+- **Server:** `backend/main.py` exposes FastAPI endpoints used to upload files, trigger ingestion, and clear the wiki/index.
+
+**Key files and responsibilities**
+
+- `backend/main.py` — FastAPI entrypoint and lifecycle (creates embedder and Chroma client).
+- `backend/schema.py` — Prompt templates and strict ingestion/query schema strings.
+- `backend/services/ingestion.py` — IngestionService: orchestrates extraction, parsing, writing, and indexing.
+- `backend/services/query_service.py` — Helpers to load relevant context and build query prompts.
+- `backend/services/clear_wiki.py` — ClearWikiService: remove wiki files and reset the Chroma collection.
+- `backend/utils/pdf_utils.py` — PDF extraction (PyMuPDF) and OCR fallback (EasyOCR).
+- `backend/utils/llm_utils.py` — Streaming adapters for Ollama and Groq cloud.
+- `chroma_db/`, `raw/`, `wiki/` — runtime storage locations for DB, raw files, and generated content.
+
+**How the ingestion pipeline works (conceptual)**
+
+1. PDF uploaded (or placed in `raw/`).
+2. `PDFService.extract_pdf_text` extracts text via PyMuPDF; EasyOCR is used as a fallback for scanned pages.
+3. Text is chunked; each chunk is combined with an ingestion prompt (from `backend/schema.py`).
+4. An LLM streaming adapter produces a JSON array describing page objects for the chunk (`name`, `url`, `category`, `text`).
+5. `IngestionService._parse_pages` extracts the JSON, `_write_wiki_pages` saves markdown pages to `wiki/`, and `_index_wiki_page` embeds and upserts pages into Chroma.
+
+**Development / Run instructions**
+
+1. Set up a virtual environment and install dependencies:
+
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate    # on Windows use: .\.venv\Scripts\activate
+pip install -r backend/requirements.txt
 ```
 
-If using Ollama locally:
+2. Environment variables (examples):
+
+- `OLLAMA_URL` — e.g. `http://localhost:11434/api/generate` (if using Ollama locally).
+- `MODEL` — model name used by the Ollama adapter.
+- `GROQ_API_KEY` and `GROQ_MODEL` — if using Groq cloud.
+- `OCR_GPU` — set to `false` on CPU-only systems to prevent EasyOCR from trying to use CUDA.
+
+3. Run the FastAPI backend:
+
 ```bash
-ollama pull <model-name>
-ollama serve
+uvicorn backend.main:app --reload --port 8000
 ```
 
-## Run
-Start the Streamlit app:
-```bash
-streamlit run app.py
-```
+4. Use the ingestion-focused endpoints described below to upload and ingest PDFs.
 
-On Windows (PowerShell) set env vars and run:
-```powershell
-$env:GROQ_API_KEY = "your_key_here"
-$env:OLLAMA_URL = "http://localhost:11434/api/generate"
-streamlit run app.py
-```
+**API endpoints (ingestion-focused)**
 
-On Windows (cmd):
-```cmd
-set GROQ_API_KEY=your_key_here
-set OLLAMA_URL=http://localhost:11434/api/generate
-streamlit run app.py
-```
+- `POST /upload` — Upload a PDF. Saves the file into `raw/`.
+  - Example:
 
-UI flow:
-- Ingest PDFs — upload PDF(s); the app extracts text (pymupdf, falls back to EasyOCR), splits source content into 20k-character chunks, and sends each chunk to the LLM using `build_ingest_prompt`.
-	- The LLM is expected to emit files wrapped in `===FILE: wiki/PageName.md=== ... ===END===` blocks. `parse_pages` parses those blocks and `write_wiki_pages` writes page files and updates `wiki/log.md` and `wiki/index.md`.
-	- Raw PDFs are saved into `raw/`.
-- Ask Questions — the app builds a prompt with `build_query_prompt` or `build_question_prompt` that includes `load_wiki_context()` output (index + pages), then streams the model response to the UI.
-- Browse Wiki — view rendered markdown pages or expand to view raw markdown.
+- `POST /ingest` — Trigger ingestion for PDFs in `raw/`. Extracts text, streams the LLM parsing, writes wiki pages, and indexes content.
+  - Example:
 
-## Behavior notes & caveats
-- OCR GPU: `easyocr.Reader(['en'], gpu=True)` may be slow or fail without a proper GPU/CUDA setup — set `gpu=False` in `utils/utils.py` if needed.
-- Chunking: ingestion currently splits source text into fixed 20,000-character chunks before prompting the LLM; the first chunk includes the full `SCHEMA` block, later chunks receive a shorter reminder.
-- Parsing: `parse_pages` expects model output in `===FILE: ... ===` / `===END===` blocks. If parsing fails, the full model response is saved to `wiki/_last_response.txt` and a fallback single page is written.
-- Context size: `load_wiki_context` concatenates `index.md` and page files and truncates to ~80k characters; very large wikis will be trimmed before being sent to models.
-- Path safety: `write_wiki_pages` validates output paths to avoid directory traversal or suspicious writes.
-- Clear wiki: the UI "Clear Wiki" button removes the `wiki/` directory and recreates it (no confirmation dialog currently).
+- `DELETE /wiki/clear` — Clears the `wiki/` directory and resets the Chroma collection (destructive).
 
-## Troubleshooting
-- Ingest failures: inspect `wiki/_last_response.txt` for raw model output.
-- OCR install errors: try CPU mode or install appropriate CUDA drivers for your GPU.
-- Ollama: ensure `ollama serve` is running and `MODEL` matches a pulled model. `OLLAMA_URL` default points at the app's expected endpoint for streaming generation.
+**Data locations**
 
-## Contributing / Next steps
-- Improve `parse_pages` robustness, add unit tests for parsing/writing, and consider sentence-aware chunking or embedding-based retrieval for better query context.
+- Raw PDFs: `raw/`
+- Generated wiki pages: `wiki/`
+- Persistent vector DB: `chroma_db/`
 
-## Checklist / TODO
-- [ ] Add verification back after ingestion stabilizes
-- [ ] Sentence-aware chunking
-- [ ] Semantic search with embeddings for better query context retrieval
-- [ ] Confirmation dialog on clear wiki button
+Keep these directories if you want to persist indexed content.
+
+**Known issues & caveats**
+
+- The ingestion parser assumes the LLM emits a JSON array. If the model outputs extra text, parsing may fail — the code writes the raw response to `wiki/_last_response.txt` and falls back to a safe behavior.
+- EasyOCR may attempt to use GPU by default; set `OCR_GPU=false` or change the code if running on CPU-only environments.
+- Some older UI helper modules (prompt/writer utilities) may not be present; use the `backend/services/` implementations as authorities for ingestion behavior.
+- There is some duplication between query helper modules; consider consolidating before extensive query feature work.
+- Filenames for wiki pages are taken from model outputs; sanitize these values before trusting them in untrusted environments.
+
+**Next steps (recommended)**
+
+- [ ] Improve chunking strategy to sentence level rather than just hard stop.
+- [ ] Add unit tests.
+- [ ] Complete QueryService Backend integration.
+- [x] Make OCR GPU usage configurable and add graceful fallback handling.
+
+

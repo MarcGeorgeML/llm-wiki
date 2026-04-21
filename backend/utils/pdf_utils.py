@@ -1,13 +1,20 @@
 
+import os
+from pydoc import text
 import pymupdf as fitz
 import easyocr
 import numpy as np
 from PIL import Image
 import io
 import cv2
+from dotenv import load_dotenv
+load_dotenv()
+
+OCR_GPU = os.getenv("OCR_GPU", "True").lower()
+OCR_GPU = True if OCR_GPU == "true" else False
 
 
-reader = easyocr.Reader(['en'], gpu=True)
+reader = easyocr.Reader(['en'], gpu=OCR_GPU)
 
 class PDFService:
 
@@ -44,6 +51,40 @@ class PDFService:
                 ocr = "\n".join(lines).strip()
                 if ocr:
                     pages_text.append(ocr)
-        return "\n".join(pages_text)
+        return "\n\n---PAGE_BREAK---\n\n".join(pages_text)
+    
+    def chunk_text(self, text: str, max_chars: int = 6000) -> list[str]:
+        pages = text.split("\n\n---PAGE_BREAK---\n\n")
+        
+        # If very small doc → no chunking at all
+        if len(text) <= max_chars:
+            return [text]
 
+        chunks = []
+        current = []
+        current_len = 0
+
+        for page in pages:
+            page_len = len(page)
+
+            # Case 1: single page too large → keep as its own chunk
+            if page_len >= max_chars:
+                if current:
+                    chunks.append("\n\n".join(current))
+                    current, current_len = [], 0
+                chunks.append(page)
+                continue
+
+            # Case 2: accumulate pages until threshold
+            if current_len + page_len > max_chars:
+                chunks.append("\n\n".join(current))
+                current, current_len = [], 0
+
+            current.append(page)
+            current_len += page_len
+
+        if current:
+            chunks.append("\n\n".join(current))
+
+        return chunks
 
