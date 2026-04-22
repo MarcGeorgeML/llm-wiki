@@ -2,95 +2,137 @@
 
 **Overview**
 
-llm-wiki is a document ingestion and question-answering project that extracts content from PDFs, converts them into structured markdown wiki pages, and indexes those pages into a persistent Chroma vector store for retrieval. The repository is focused on the backend ingestion pipeline implemented with FastAPI. The ingestion phase (PDF -> wiki pages -> Chroma index) is implemented and functional.
+llm-wiki is a backend service that turns PDFs into a simple markdown wiki and lets you ask questions about that content using an LLM. The FastAPI backend handles PDF uploads, runs the ingestion pipeline (text extraction → LLM-driven page creation → markdown files), and exposes endpoints to ingest, query, list, and manage the wiki.
 
-**Status**
+**Quick summary**
 
-- **Completed:** Ingestion pipeline (upload or place PDFs -> extract -> chunk -> LLM-driven page extraction -> write markdown pages -> index into Chroma).
-- **In progress / Not provided here:** Query UI and a production front-end. The canonical backend services and helpers for querying and prompt building exist but the frontend is not bundled as the primary entrypoint.
+- **Input:** PDFs uploaded via the API or placed into the `raw/` folder.
+- **Output:** Structured markdown pages written to the `wiki/` folder.
+- **Core runtime:** FastAPI app in `backend/main.py` with small services in `backend/services/`.
 
-**Architecture (high level)**
+**What's included**
 
-- **Input:** PDF files placed into the `raw/` directory or uploaded via the API.
-- **Processing:** `backend/services/ingestion.py` (PDF extraction, chunking, building ingestion prompts, streaming LLM output, parsing JSON page objects, writing markdown pages, indexing to Chroma).
-- **Storage:** Generated markdown pages are saved to `wiki/` and vector embeddings are stored in `chroma_db/`.
-- **Server:** `backend/main.py` exposes FastAPI endpoints used to upload files, trigger ingestion, and clear the wiki/index.
+- **Prompt templates and strict schemas:** backend/schema.py
+- **Ingestion orchestration:** backend/services/ingestion_service.py (`IngestionService`)
+- **Query orchestration:** backend/services/query_service.py (`QueryService`)
+- **Cleanup & pruning:** backend/services/cleanup_service.py (`CleanupService`)
+- **Wiki helpers:** backend/services/wiki_service.py (`WikiService`) and backend/services/clear_wiki.py (`ClearWikiService`)
+- **PDF & OCR utilities:** backend/utils/utils.py (`PDFService`) — PyMuPDF extraction with EasyOCR fallback
+- **LLM streaming adapters:** backend/utils/llm_utils.py (Groq and Ollama streaming)
 
-**Key files and responsibilities**
+**How the system works (data flow)**
 
-- `backend/main.py` — FastAPI entrypoint and lifecycle (creates embedder and Chroma client).
-- `backend/schema.py` — Prompt templates and strict ingestion/query schema strings.
-- `backend/services/ingestion.py` — IngestionService: orchestrates extraction, parsing, writing, and indexing.
-- `backend/services/query_service.py` — Helpers to load relevant context and build query prompts.
-- `backend/services/clear_wiki.py` — ClearWikiService: remove wiki files and reset the Chroma collection.
-- `backend/utils/pdf_utils.py` — PDF extraction (PyMuPDF) and OCR fallback (EasyOCR).
-- `backend/utils/llm_utils.py` — Streaming adapters for Ollama and Groq cloud.
-- `chroma_db/`, `raw/`, `wiki/` — runtime storage locations for DB, raw files, and generated content.
+1. A PDF is uploaded to the backend (POST /upload) or placed in `raw/`.
+2. The ingestion endpoint (`POST /ingest`) reads PDFs from `raw/`, and `POST /ingest/single` accepts a single uploaded PDF.
+3. The service extracts text from the PDF (PyMuPDF; EasyOCR fallback for scanned pages) and splits the text into chunks.
+4. For each chunk the backend builds an ingestion prompt (see `backend/schema.py`) and streams an LLM response that should be a JSON array of page and index objects.
+5. The ingestion service parses the JSON and writes or appends markdown files under `wiki/`. Each page includes a `## Sources` section with the original filename. If parsing fails, the raw model response is saved to `wiki/_last_response.txt`.
 
-**How the ingestion pipeline works (conceptual)**
+**Runtime / environment**
 
-1. PDF uploaded (or placed in `raw/`).
-2. `PDFService.extract_pdf_text` extracts text via PyMuPDF; EasyOCR is used as a fallback for scanned pages.
-3. Text is chunked; each chunk is combined with an ingestion prompt (from `backend/schema.py`).
-4. An LLM streaming adapter produces a JSON array describing page objects for the chunk (`name`, `url`, `category`, `text`).
-5. `IngestionService._parse_pages` extracts the JSON, `_write_wiki_pages` saves markdown pages to `wiki/`, and `_index_wiki_page` embeds and upserts pages into Chroma.
+Prerequisites:
 
-**Development / Run instructions**
+- Python 3.10+ recommended
+- GPU optional for EasyOCR; code supports CPU-only but OCR may be slower
 
-1. Set up a virtual environment and install dependencies:
+Install dependencies:
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate    # on Windows use: .\.venv\Scripts\activate
+# Windows
+.\.venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
 pip install -r backend/requirements.txt
 ```
 
-2. Environment variables (examples):
+Environment variables (examples):
 
-- `OLLAMA_URL` — e.g. `http://localhost:11434/api/generate` (if using Ollama locally).
-- `MODEL` — model name used by the Ollama adapter.
-- `GROQ_API_KEY` and `GROQ_MODEL` — if using Groq cloud.
-- `OCR_GPU` — set to `false` on CPU-only systems to prevent EasyOCR from trying to use CUDA.
+- `OLLAMA_URL` — Ollama local API, e.g. http://localhost:11434/api/generate
+- `MODEL` — model name used by the Ollama adapter
+- `GROQ_API_KEY` — API key for Groq cloud (optional)
+- `GROQ_MODEL` — Groq model identifier (optional)
+- `OCR_GPU` — true/false (controls EasyOCR GPU usage)
 
-3. Run the FastAPI backend:
+Start the backend (development):
 
 ```bash
 uvicorn backend.main:app --reload --port 8000
 ```
 
-4. Use the ingestion-focused endpoints described below to upload and ingest PDFs.
+The FastAPI app registers services during lifespan and exposes the endpoints below.
 
-**API endpoints (ingestion-focused)**
+**API (core endpoints)**
 
-- `POST /upload` — Upload a PDF. Saves the file into `raw/`.
-  - Example:
+- POST /upload
+  - Upload a PDF file (multipart/form-data). The file is saved to raw/.
 
-- `POST /ingest` — Trigger ingestion for PDFs in `raw/`. Extracts text, streams the LLM parsing, writes wiki pages, and indexes content.
-  - Example:
+- POST /ingest
+  - Trigger ingestion for all PDFs in `raw/`. The service processes each file and returns per-file results.
 
-- `DELETE /wiki/clear` — Clears the `wiki/` directory and resets the Chroma collection (destructive).
+- POST /ingest/single
+  - Upload a single PDF and ingest it immediately. The uploaded file is also saved to `raw/`.
 
-**Data locations**
+- POST /query/simple
+  - Submit a simple question (JSON body {"query": "..."}). The service selects relevant pages and streams an LLM answer that is constrained to the wiki content.
 
-- Raw PDFs: `raw/`
-- Generated wiki pages: `wiki/`
-- Persistent vector DB: `chroma_db/`
+- POST /query/pdf
+  - Upload a PDF that contains one or more questions. The backend extracts the text and runs the query flow using the extracted questions.
 
-Keep these directories if you want to persist indexed content.
+- GET /wiki/pages
+  - List available page names from the wiki/ directory.
 
-**Known issues & caveats**
+- GET /wiki/page/{page_name}
+  - Retrieve a page's markdown content. Optional download flag returns the file.
 
-- The ingestion parser assumes the LLM emits a JSON array. If the model outputs extra text, parsing may fail — the code writes the raw response to `wiki/_last_response.txt` and falls back to a safe behavior.
-- EasyOCR may attempt to use GPU by default; set `OCR_GPU=false` or change the code if running on CPU-only environments.
-- Some older UI helper modules (prompt/writer utilities) may not be present; use the `backend/services/` implementations as authorities for ingestion behavior.
-- There is some duplication between query helper modules; consider consolidating before extensive query feature work.
-- Filenames for wiki pages are taken from model outputs; sanitize these values before trusting them in untrusted environments.
+- DELETE /wiki/clear
+  - Remove the wiki/ directory and recreate it empty (destructive).
 
-**Next steps (recommended)**
+Examples (curl):
 
-- [ ] Improve chunking strategy to sentence level rather than just hard stop.
-- [ ] Add unit tests.
-- [ ] Complete QueryService Backend integration.
-- [x] Make OCR GPU usage configurable and add graceful fallback handling.
+```bash
+# Upload a PDF
+curl -F "file=@/path/to/doc.pdf" http://localhost:8000/upload
+
+# Trigger ingestion (default uses local Ollama stream adapter)
+curl -X POST http://localhost:8000/ingest
+
+# Query a simple question
+curl -H "Content-Type: application/json" -d '{"query":"What is X?"}' http://localhost:8000/query/simple
+```
+
+**Key implementation notes**
+
+- The code constrains LLM behavior with strict prompt schemas in backend/schema.py — ingestion expects a JSON array of page/index objects, query selection expects a JSON array of page names, and cleanup/prune flows expect specific outputs. These schemas are central to reliable parsing.
+- If the LLM emits extra text or code fences, ingestion parsing may fail; the raw response is written to wiki/_last_response.txt to help debugging.
+- `PDFService.extract_pdf_text` returns text separated by the token "---PAGE_BREAK---" between original PDF pages. Chunking operates on those page boundaries.
+- `IngestionService.execute` accepts a filename plus PDF bytes (`execute(filename: str, pdf_bytes: bytes`) and returns a per-file result summary. This is used by both `/ingest` (process all files) and `/ingest/single` (single uploaded file).
+- Each generated wiki page includes a `## Sources` section listing the original PDF filename.
+
+**File structure (important files & directories)**
+
+- backend/main.py
+- backend/schema.py
+- backend/services/ingestion_service.py
+- backend/services/query_service.py
+- backend/services/cleanup_service.py
+- backend/services/clear_wiki.py
+- backend/services/wiki_service.py
+- backend/utils/utils.py
+- backend/utils/llm_utils.py
+- backend/requirements.txt
+- raw/        # place PDFs here or use POST /upload
+- wiki/       # generated markdown pages and index.md
+
+**Troubleshooting & tips**
+
+- If parsing fails frequently, inspect wiki/_last_response.txt to see exactly what the model returned.
+- On CPU-only machines set OCR_GPU=false to avoid EasyOCR GPU errors.
+- The ingestion flow was built to be deterministic where possible (low temperature, explicit schema). If you change model settings, re-check for parsing robustness.
+
+If you want, I can now:
+
+- add a short diagram of the service call flow, or
+- implement small tests that validate ingestion with a sample PDF.
 
 

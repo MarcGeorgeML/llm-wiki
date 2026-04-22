@@ -12,8 +12,8 @@ class ClearWikiService:
             shutil.rmtree(self.WIKI_DIR)
         self.WIKI_DIR.mkdir()
 
-        # if self.RAW_DIR.exists():
-        #     shutil.rmtree(self.RAW_DIR)
-        # self.RAW_DIR.mkdir()
+        if self.RAW_DIR.exists():
+            shutil.rmtree(self.RAW_DIR)
+        self.RAW_DIR.mkdir()
 
         return {"status": "cleared"}

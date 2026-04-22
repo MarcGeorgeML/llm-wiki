@@ -1,5 +1,5 @@
 import os
-from groq import Groq
+import groq
 import json
 import urllib.request
 from dotenv import load_dotenv
@@ -12,7 +12,7 @@ MODEL = os.getenv("MODEL", "gemma3:12b")
 
 
 def ask_groq_stream(prompt: str, system: str = ""):
-    client = Groq(api_key=GROQ_API_KEY)
+    client = groq.Groq(api_key=GROQ_API_KEY)
     messages = []
     if system:
         messages.append({"role": "system", "content": system})

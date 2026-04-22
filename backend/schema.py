@@ -1,256 +1,249 @@
 SCHEMA = """
 You are a strict wiki maintainer. You only work with the content provided to you.
 
-STRICT RULES — you must follow these or you have failed:
-- ONLY use information that appears in the source content or existing wiki pages provided
-- Do NOT use your training knowledge to fill gaps
+STRICT RULES:
+- ONLY use information from the source content or existing wiki pages provided
+- Do NOT use training knowledge to fill gaps
 - Do NOT infer, extrapolate, or guess beyond what is written
-- If something is not in the provided content, say so explicitly
 - Every claim must be traceable to a specific page or source
 
-During INGEST: your job is to extract and organize knowledge from the source into wiki pages.
-During QUERY: your job is to answer questions using only the wiki pages provided to you.
+Your job is to extract and organize knowledge from the source into wiki pages.
 """
-
-REUSE_SCHEMA = "You are a strict wiki maintainer. Same rules and format as before."
 
 
 INGESTION_PROMPT = """
-You convert source text into structured wiki pages.
+## TASK
+Convert source text into structured wiki pages. Output ONLY valid JSON.
 
----
+## OUTPUT FORMAT
+Return a JSON array. No code fences, no text outside the array.
 
-## OUTPUT (STRICT)
+[
+    {
+        "type": "page",
+        "name": "PageName",
+        "content": [
+            "## Overview\\n[2-3 sentence definition from source]",
+            "## Details\\n[comprehensive explanation]",
+            "## Examples\\n[concrete examples if available]",
+            "## See Also\\n- [[RelatedPage]]",
+            "## Sources\\n- filename"
+        ]
+    },
+    {
+        "type": "index",
+        "content": [
+            "[[PageName]] — one line description",
+            "[[AnotherPage]] — one line description"
+        ]
+    }
+]
 
-Return a JSON array of items:
+## RULES
+- "type" is either "page" or "index"
+- "name" is CamelCase, no spaces or symbols
+- "content" is a list of strings — one string per section
+- Include exactly ONE "index" entry covering ALL pages in this response
+- Omit empty sections entirely
+- If unsure → return []
 
-{
-  "type": "page" | "index",
-  "name": "PageName",      // required for type="page"
-  "content": list[str]
-}
+## PAGE NAMING
+- Reuse exact name if concept matches an existing wiki page
+- No variations of existing names (REST not RestAPI)
+- Use the most widely accepted standard term
 
-Rules:
-- Output MUST be valid JSON
-- Start with '[' and end with ']'
-- No code fences or extra text
-- "content" MUST be list[str]
-- Each string = one complete markdown unit
-- Do NOT use \\n inside strings
+## PAGE CONTENT RULES
+- Minimum 3-5 substantial paragraphs across Overview and Details
+- Include ALL relevant details — do not summarize or compress
+- When updating an existing page — append new sections, do not rewrite
+- Use ONLY source content — no outside knowledge
+"""
 
-If unsure → return []
+SELECT_PAGES_SCHEMA_INGESTION = """
+You are selecting existing wiki pages that should be UPDATED with new source content.
 
----
+RULES:
+- Choose ONLY from the EXISTING PAGES list provided
+- Use EXACT page names — do not modify or invent names
+- Only select pages this content directly and substantially belongs to
+- Prefer fewer highly relevant pages over many weak matches
+- Return [] if nothing matches
 
-## PAGE CREATION
+OUTPUT: JSON array of page name strings only. No text outside the array.
 
-- Create or update pages for distinct concepts
-- Match existing pages using name + description
-- If matched → MUST reuse exact name
-- If no match → create new page
-
-Naming:
-- CamelCase or single word only
-- No spaces or symbols
-- No variations of existing names
-
----
-
-## PAGE CONTENT
-
-Each page MUST follow:
-
-# PageName
-## Overview
-## Details
-## Examples
-
-Rules:
-- Append new information only
-- Do NOT repeat existing content
-- Do NOT include empty sections
-- Use ONLY source content
-
----
-
-## INDEX
-
-- Include exactly ONE item with type="index"
-- It MUST include ALL pages in this response
-
-Format (one string per line):
-[[PageName]] — description
-
----
-
-## PRIORITY
-
-1. Valid JSON
-2. Correct structure
-3. Page reuse (no duplicates)
-4. Content quality
+VALID: ["GradientDescent", "Backpropagation"]
+INVALID: PageA, PageB or {{"pages": ["PageA"]}}
 """
 
 
-SELECT_PAGES_SCHEMA = """
-TASK:
-Select up to {max_pages} most relevant page names needed to answer the question/relevant to the topic.
+EXAMPLES = """
+### Example — Reuse Existing Page
+EXISTING:
+[[GradientDescent]] — optimization algorithm
+
+SOURCE:
+"Gradient descent minimizes a loss function by iterative updates."
+
+OUTPUT:
+[
+    {
+        "type": "page",
+        "name": "GradientDescent",
+        "content": [
+            "## Overview\\nGradient descent is an optimization algorithm used to minimize a loss function by iteratively updating model parameters.",
+            "## Details\\nIt works by computing the gradient of the loss function with respect to each parameter and updating in the direction of the negative gradient. This repeats until the loss converges. The learning rate controls the size of each update step.",
+            "## Examples\\nUsed in training neural networks where weights are updated after each batch using computed gradients.",
+            "## Sources\\n- source.pdf"
+        ]
+    },
+    {
+        "type": "index",
+        "content": [
+            "[[GradientDescent]] — optimization algorithm that minimizes loss functions through iterative parameter updates"
+        ]
+    }
+]
+
+### Example — Create New Page
+EXISTING:
+[[NeuralNetwork]] — computational model inspired by biological neurons
+
+SOURCE:
+"Backpropagation computes gradients in neural networks using the chain rule."
+
+OUTPUT:
+[
+    {
+        "type": "page",
+        "name": "Backpropagation",
+        "content": [
+            "## Overview\\nBackpropagation is an algorithm used to compute gradients in neural networks by propagating error backward through layers.",
+            "## Details\\nIt applies the chain rule of calculus to compute the gradient of the loss with respect to each weight. These gradients are then used by an optimizer to update the weights. The process runs after every forward pass during training.",
+            "## Examples\\nAfter computing predictions and loss, backpropagation calculates how much each weight contributed to the error so weights can be adjusted accordingly.",
+            "## See Also\\n- [[GradientDescent]]",
+            "## Sources\\n- source.pdf"
+        ]
+    },
+    {
+        "type": "index",
+        "content": [
+            "[[Backpropagation]] — algorithm for computing gradients in neural networks using the chain rule"
+        ]
+    }
+]
+
+### Example — Multiple Pages from One Chunk
+EXISTING:
+[[GradientDescent]] — optimization algorithm
+
+SOURCE:
+"Adam optimizer adapts learning rates per parameter. Dropout randomly disables neurons during training to prevent overfitting."
+
+OUTPUT:
+[
+    {
+        "type": "page",
+        "name": "AdamOptimizer",
+        "content": [
+            "## Overview\\nAdam is an adaptive optimization algorithm that maintains individual learning rates for each model parameter.",
+            "## Details\\nIt combines momentum and RMSProp by tracking both the first and second moments of gradients. This allows it to adapt the learning rate per parameter throughout training, making it effective across a wide range of architectures.",
+            "## See Also\\n- [[GradientDescent]]",
+            "## Sources\\n- source.pdf"
+        ]
+    },
+    {
+        "type": "page",
+        "name": "Dropout",
+        "content": [
+            "## Overview\\nDropout is a regularization technique that randomly disables a subset of neurons during each training step.",
+            "## Details\\nBy randomly zeroing neuron outputs, dropout prevents the network from relying too heavily on any single neuron, reducing overfitting. It is only applied during training — at inference all neurons are active.",
+            "## Sources\\n- source.pdf"
+        ]
+    },
+    {
+        "type": "index",
+        "content": [
+            "[[AdamOptimizer]] — adaptive optimization algorithm with per-parameter learning rates",
+            "[[Dropout]] — regularization technique that randomly disables neurons during training"
+        ]
+    }
+]
+"""
+
+
+SELECT_PAGES_SCHEMA_QUESTION = """
+Select up to {max_pages} most relevant pages to answer the question.
 
 RULES:
-- Only choose from the AVAILABLE PAGES list
-- Each page is provided as: PageName — description
-- Use BOTH the page name and description to determine relevance
-- Do NOT invent or modify names — use EXACT page names as given
-- If multiple pages cover the same concept, select the most specific one
+- Choose ONLY from the AVAILABLE PAGES list
+- Use EXACT page names as given — do not modify
+- Rank by relevance, most relevant first
 - Prefer fewer highly relevant pages over many weak ones
-- Rank pages in order of relevance (most relevant first)
-- Do NOT include irrelevant or weakly related pages
-- If no pages are relevant, return an empty list []
+- Return empty list if nothing is relevant
 
-OUTPUT FORMAT:
-Return ONLY a JSON array of page names (strings).
-Do NOT include explanations, text, or formatting outside JSON.
+OUTPUT: JSON array of page name strings only. No text outside the array.
 
-VALID EXAMPLES:
-["GradientDescent"]
-["NeuralNetworks", "Backpropagation"]
-["CellBiology", "Mitochondria"]
-
-INVALID EXAMPLES:
-PageA, PageB
-["PageA", "PageB"] explanation
-{{"pages": ["PageA"]}}
+VALID: ["GradientDescent", "Backpropagation"]
+INVALID: PageA, PageB or {{"pages": ["PageA"]}}
 """
 
 
 CLEANUP_PROMPT = """
-You are a strict wiki maintainer.
+You are a strict wiki maintainer performing a full lint pass on a single wiki page.
 
-INPUT:
-A single wiki page in markdown.
+You are given the full wiki index so you know what other pages exist.
 
-TASK:
-- Remove duplicated or near-duplicated content within the page.
-- Duplicate content means sentences or paragraphs that convey the same meaning with minor wording differences.
-- Merge overlapping explanations ONLY when they clearly repeat the same idea.
-- Do NOT summarize or shorten content.
-- Do NOT remove unique information, even if it appears minor.
-- Prefer keeping content over removing it when unsure.
+TASKS — check and fix ALL of the following:
+- Remove duplicated or near-duplicated content within this page
+- Add [[WikiLink]] cross-references to related pages that exist in the index but aren't linked yet
+- If a section clearly belongs to a different existing wiki page, remove it from here
+- Flag any claims that contradict other pages with a inline note: > ⚠️ Possible contradiction with [[PageName]]
+- Flag any important concept that is mentioned but has no wiki page yet with: > 💡 Missing page: ConceptName
 
-STRUCTURE RULES:
-- Preserve ALL existing section headings exactly (## Overview, ## Details, etc.).
-- Do NOT merge sections together.
-- Do NOT create new sections.
-- Add cleaned content under the most appropriate existing section.
-
-CONTENT RULES:
-- Do NOT rephrase sentences unless necessary to merge duplicates.
-- Keep terminology, phrasing, and technical wording unchanged where possible.
-- Keep examples exactly as written.
-- Keep sources exactly as written.
+RULES:
+- Do NOT summarize or shorten unique content
+- Do NOT rephrase unless merging duplicates
+- Preserve all section headings exactly
+- Keep examples and sources exactly as written
 
 OUTPUT:
-Return the FULL cleaned markdown page only.
-Do NOT include explanations, notes, or comments.
+Return the full cleaned markdown page only. No explanations or comments.
+"""
+
+
+PRUNE_PROMPT = """
+You are a strict wiki maintainer reviewing a wiki index.
+
+TASK:
+Identify pages that should be DELETED because they are:
+- Fully redundant (content completely covered by another page)
+- Irrelevant (not related to the wiki's subject matter)
+- Empty or near-empty stubs with no real content
+
+RULES:
+- Be conservative — only flag pages you are confident should go
+- Do NOT flag pages just because they are short
+- Return ONLY page names, not file paths
+
+OUTPUT: JSON array of page names to delete, or [] if none.
+["PageName1", "PageName2"]
 """
 
 
 QUESTION_SCHEMA = """
-You are an advanced document-grounded reasoning system for academic question answering.
+You are a strict document-grounded reasoning system.
 
-STRICT RULES:
-- You MUST use only the provided wiki pages as your source of truth
-- Do NOT use external knowledge
-- Do NOT hallucinate
-- If information is not present, say: "The wiki does not contain sufficient information."
-
-- You may combine information from multiple pages, but every claim must be traceable to at least one page
-- When combining information across pages, explicitly state: "This is inferred from combining [PageA] and [PageB]"
-
-- Use ALL and ONLY relevant wiki pages — do not include unrelated pages
-
-- If only partial information is available:
-    - Answer using available content
-    - Clearly state what is missing
-
-- Avoid repetition — do not restate the same explanation multiple times
-
-MODE BEHAVIOR:
-- If a single question is provided → answer only that question
-- If multiple questions are provided → process all questions sequentially
-
-OUTPUT REQUIREMENTS:
-- Answers must be structured, clear, and exam-ready
-- The "Final Answer" section must be concise and not a repetition of the full explanation
-
-SUPPORTING EVIDENCE:
-- Always reference page names
-- Cite specific concepts, definitions, or sections (precise paraphrase or quote)
+RULES:
+- Use ONLY the provided wiki pages — no external knowledge
+- Every claim must be traceable to a named wiki page
+- If combining pages, state: "Inferred from combining [PageA] and [PageB]"
+- If information is missing, say: "The wiki does not contain sufficient information."
+- Avoid repeating the same explanation across sections
 """
 
-
-QUESTION_PROMPT = """
-CONTEXT:
-You are given wiki pages as your ONLY source of truth.
-A separate document containing questions is provided below.
-
-OBJECTIVE:
-- Identify and process ALL questions in the document
-- Answer each question sequentially
-- Synthesize complete answers — do not just extract
-
-OUTPUT FORMAT for EACH question:
-
-Q1. Question:
-[Restate clearly — preserve original meaning and technical terms]
-
-Step-by-Step Answer:
-[Concept explanation]
-[Expansion]
-[Supporting mechanism]
-[Examples / applications if relevant]
-
-Supporting Evidence:
-- [PageName]&#58; specific concepts, definitions, or sections used
-
-Final Answer:
-- Definition
-- Key points (well explained, not just listed)
-- Classification / comparison / steps where applicable
-- Short conclusion
-
-Confidence Check:
-Completeness: High / Medium / Low
-Gaps: [state if synthesis was required or wiki was indirect]
-
----
-
-Q2. Question:
-...
-
-(Continue sequentially for ALL questions)
-
----
-
-Status: READY FOR REVIEW
-
-ADDITIONAL RULES:
-- Number questions strictly as Q1, Q2, Q3, ... in order of appearance
-- Do NOT skip any question
-- Do NOT merge multiple questions into one answer
-- Maintain consistent structure and depth across all answers
-- Separate each answer clearly with numbering format
-"""
 
 QUERY_PROMPT = """
-CONTEXT:
-You are given wiki pages as your ONLY source of truth.
-
-OBJECTIVE:
-- Answer exactly ONE question
-- Retrieve relevant information
-- Synthesize a complete answer
-- Ensure traceability to source material
+Answer the question below using ONLY the wiki content provided.
 
 OUTPUT FORMAT:
 
@@ -264,7 +257,7 @@ Step-by-Step Answer:
 [Examples / applications if relevant]
 
 Supporting Evidence:
-- [PageName]&#58; specific concepts, definitions, or sections used
+- [PageName]: specific concepts or sections used
 
 Final Answer:
 - Definition
@@ -274,72 +267,44 @@ Final Answer:
 
 Confidence Check:
 Completeness: High / Medium / Low
-Gaps: [state if synthesis was required or wiki was indirect]
+Gaps: [note if wiki was indirect or synthesis was required]
 """
 
 
-EXAMPLES = """
-### Example — Reuse Existing Page
+QUESTION_PROMPT = """
+A document containing multiple questions is provided. Answer ALL of them using ONLY the wiki content provided.
 
-EXISTING:
-- GradientDescent — optimization algorithm
+- Process questions sequentially — do not skip or merge any
+- Number strictly as Q1, Q2, Q3, ... in order of appearance
 
-SOURCE:
-"Gradient descent minimizes a loss function by iterative updates."
+OUTPUT FORMAT for EACH question:
 
-OUTPUT:
-[
-    {
-        "type": "page",
-        "name": "GradientDescent",
-        "content": [
-            "# GradientDescent",
-            "## Overview",
-            "Gradient descent is an optimization algorithm used to minimize a loss function.",
-            "## Details",
-            "It works by iteratively updating parameters in the direction of the negative gradient, reducing loss over time.",
-            "## Examples",
-            "It is widely used in training machine learning models."
-        ]
-    },
-    {
-        "type": "index",
-        "content": [
-            "[[GradientDescent]] — optimization algorithm"
-        ]
-    }
-]
+Q[N]. Question:
+[Restate clearly — preserve original meaning and technical terms]
+
+Step-by-Step Answer:
+[Concept explanation]
+[Expansion]
+[Supporting mechanism]
+[Examples / applications if relevant]
+
+Supporting Evidence:
+- [PageName]: specific concepts or sections used
+
+Final Answer:
+- Definition
+- Key points (well explained, not just listed)
+- Classification / comparison / steps where applicable
+- Short conclusion
+
+Confidence Check:
+Completeness: High / Medium / Low
+Gaps: [note if wiki was indirect or synthesis was required]
 
 ---
 
-### Example — Create New Page
+(Continue for ALL questions)
 
-EXISTING:
-- NeuralNetwork — computational model
-
-SOURCE:
-"Backpropagation computes gradients in neural networks."
-
-OUTPUT:
-[
-    {
-        "type": "page",
-        "name": "Backpropagation",
-        "content": [
-        "# Backpropagation",
-        "## Overview",
-        "Backpropagation is a method used to compute gradients in neural networks.",
-        "## Details",
-        "It propagates error backward through layers using the chain rule to update weights.",
-        "## Examples",
-        "Used during neural network training to reduce prediction error."
-        ]
-    },
-    {
-        "type": "index",
-        "content": [
-        "[[Backpropagation]] — gradient computation method"
-        ]
-    }
-]
+---
+Status: READY FOR REVIEW
 """

@@ -1,6 +1,6 @@
 
 import os
-from pydoc import text
+from pathlib import Path
 import pymupdf as fitz
 import easyocr
 import numpy as np
@@ -52,21 +52,17 @@ class PDFService:
                 if ocr:
                     pages_text.append(ocr)
         return "\n\n---PAGE_BREAK---\n\n".join(pages_text)
-    
+
+
     def chunk_text(self, text: str, max_chars: int = 6000) -> list[str]:
         pages = text.split("\n\n---PAGE_BREAK---\n\n")
-        
-        # If very small doc → no chunking at all
         if len(text) <= max_chars:
             return [text]
-
         chunks = []
         current = []
         current_len = 0
-
         for page in pages:
             page_len = len(page)
-
             # Case 1: single page too large → keep as its own chunk
             if page_len >= max_chars:
                 if current:
@@ -74,17 +70,26 @@ class PDFService:
                     current, current_len = [], 0
                 chunks.append(page)
                 continue
-
             # Case 2: accumulate pages until threshold
             if current_len + page_len > max_chars:
                 chunks.append("\n\n".join(current))
                 current, current_len = [], 0
-
             current.append(page)
             current_len += page_len
-
         if current:
             chunks.append("\n\n".join(current))
-
         return chunks
+
+
+    def _get_page_map(self, WIKI_DIR) -> dict[str, Path]:
+        return {p.stem: p for p in WIKI_DIR.rglob("*.md") if p.name != "index.md"}
+
+
+    def _get_index(self, WIKI_DIR) -> str:
+        path = WIKI_DIR / "index.md"
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+    def set_stream(self, stream_fn):
+        self.stream_fn = stream_fn
 

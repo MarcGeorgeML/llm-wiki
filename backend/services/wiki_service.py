@@ -7,7 +7,7 @@ class WikiService:
         self.WIKI_DIR = WIKI_DIR
 
 
-    def _resolve_page_path(self, page_name: str) -> Path | None:
+    def resolve_page_path(self, page_name: str) -> Path | None:
         if not self.WIKI_DIR.exists():
             return None
         for p in self.WIKI_DIR.rglob("*.md"):
@@ -29,15 +29,8 @@ class WikiService:
         return {"status": "ok", "pages": pages}
 
 
-    def get_page_path(self, page_name: str):
-        path = self._resolve_page_path(page_name)
-        if not path:
-            return None
-        return path
-
-
     def get_page_content(self, page_name: str) -> dict:
-        path = self._resolve_page_path(page_name)
+        path = self.resolve_page_path(page_name)
         if not path:
             return {"status": "error", "message": f"Page '{page_name}' not found"}
         return {
