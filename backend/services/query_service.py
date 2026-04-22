@@ -17,54 +17,39 @@ class QueryService(PDFService):
         stream_fn
     ):
 
+
         self.WIKI_DIR = WIKI_DIR
         self.stream_fn = stream_fn
+
 
     def set_stream(self, stream_fn):
         self.stream_fn = stream_fn
 
-    def _get_page_hints(self) -> tuple[list[str], list[str]]:
+
+    def _get_page_hints(self) -> list[str]:
         index_path = self.WIKI_DIR / "index.md"
-
         if not index_path.exists():
-            return [], []
-
-        lines = index_path.read_text(encoding="utf-8").splitlines()
-
-        names = []
-        hints = []
-
-        for line in lines:
-            line = line.strip()
-
-            # matches: - [[PageName]] — description
-            if line.startswith("- [[") and "]]" in line:
-                try:
-                    name = line.split("[[")[1].split("]]")[0]
-                    desc = line.split("—", 1)[1].strip() if "—" in line else ""
-
-                    names.append(name)
-                    hints.append(f"- {name} — {desc}" if desc else f"- {name}")
-
-                except Exception:
-                    continue
-
-        return names, hints
+            return []
+        return [
+            line.strip()
+            for line in index_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
 
 
     def _select_pages(self, query: str, max_pages: int = 5) -> list[str]:
-        page_names, page_hints = self._get_page_hints()
-
-        if not page_names:
+        hints = self._get_page_hints()
+        if not hints:
             return []
-
         prompt = f"""QUESTION:
 {query}
 
 AVAILABLE PAGES (name — description):
-{chr(10).join(page_hints)}
-max_pages = {max_pages}
-Select the most relevant pages to answer the question. Only return a JSON array of page names.
+{chr(10).join(hints)}
+
+Select up to {max_pages} most relevant pages.
+Return ONLY a JSON array of page names (strings).
+Do NOT include descriptions or formatting.
 """
         system_prompt = SELECT_PAGES_SCHEMA.format(max_pages=max_pages)
         response = "".join(self.stream_fn(prompt, system=system_prompt))
@@ -72,31 +57,45 @@ Select the most relevant pages to answer the question. Only return a JSON array 
             selected = json.loads(response)
         except Exception:
             selected = []
-        valid = set(page_names)
+        valid = {
+            line.split("[[")[1].split("]]")[0]
+            for line in hints if "[[" in line and "]]" in line
+        }
         selected = [p for p in selected if p in valid][:max_pages]
         if not selected:
-            selected = page_names[:max_pages]
+            
+            selected = [
+                line.split("[[")[1].split("]]")[0]
+                for line in hints[:max_pages]
+            ]
             print("Page selection fallback triggered")
         return list(dict.fromkeys(selected))
+
+
+    def _resolve_page(self, name: str) -> Path | None:
+        for p in self.WIKI_DIR.rglob(f"{name}.md"):
+            return p
+        return None
 
 
     def _build_wiki_context(self, selected_pages: list[str]) -> str:
         index_path = self.WIKI_DIR / "index.md"
         index = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
-
         contents = []
-        wanted = set(selected_pages)
-
-        for p in self.WIKI_DIR.rglob("*.md"):
-            if p.name == "index.md":
+        for name in selected_pages:
+            path = self._resolve_page(name)
+            if not path:
                 continue
-            if p.stem in wanted:
-                contents.append(
-                    f"[PAGE: {p.stem}]\n{p.read_text(encoding='utf-8')}"
-                )
+            contents.append(
+                f"[PAGE: {name}]\n---\n{path.read_text(encoding='utf-8')}"
+            )
+        return f"""WIKI CONTEXT
 
-        return f"""WIKI CONTEXT\n\n[Index]\n{index}\n\n[Pages]\n{chr(10).join(contents) if contents else "(no pages found)"}"""
+[Index]
+{index}
 
+[Pages]
+{chr(10).join(contents) if contents else "(no pages found)"}"""
 
 
     def _build_query_prompt(self, query: str, selected_pages: list[str]) -> str:
@@ -128,7 +127,6 @@ QUESTION DOCUMENT ({q_pdf_name}):
 
 
     def execute_query(self, query: str | None = None):
-
         if not query:
             return {"status": "error", "message": "No question provided"}
         selected_pages = self._select_pages(query)
@@ -138,6 +136,7 @@ QUESTION DOCUMENT ({q_pdf_name}):
             selected_pages=selected_pages
         )
         return self.stream_fn(prompt, system=QUESTION_SCHEMA)
+
 
     def execute_pdf(self, q_pdf: Any | None = None):
             if not q_pdf:

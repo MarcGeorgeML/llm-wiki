@@ -16,206 +16,85 @@ REUSE_SCHEMA = "You are a strict wiki maintainer. Same rules and format as befor
 
 
 INGESTION_PROMPT = """
-## On Ingest
-1. Read the source content
-2. Create a "Summary" page (once per document)
-3. Create or update one page per distinct concept
-4. Update index with one line per page
+You convert source text into structured wiki pages.
 
 ---
 
-## OUTPUT (STRICT JSON ONLY)
+## OUTPUT (STRICT)
 
-- Return ONLY a valid JSON array
-- Response MUST start with '[' and end with ']'
-- Do NOT include any text outside the JSON
-- Do NOT use markdown or code fences (no ```json)
+Return a JSON array of items:
 
-If you cannot produce valid output, return: []
-
----
-
-## CONTENT FORMAT
-
-Each item:
 {
   "type": "page" | "index",
-  "name": "PageName",        # only for type="page"
+  "name": "PageName",      // required for type="page"
   "content": list[str]
 }
 
 Rules:
-- "content" MUST be a list of strings
-- Each string = ONE markdown unit:
-  - heading OR
-  - full paragraph (2–5 sentences) OR
-  - list item
+- Output MUST be valid JSON
+- Start with '[' and end with ']'
+- No code fences or extra text
+- "content" MUST be list[str]
+- Each string = one complete markdown unit
+- Do NOT use \\n inside strings
 
-Do NOT:
-- use \\n
-- use multi-line strings
-- split a paragraph into multiple strings
-- merge unrelated ideas into one string
+If unsure → return []
 
 ---
 
-## PAGE HANDLING (Naming, Reuse, Creation, Updating)
+## PAGE CREATION
 
-EXISTING PAGES:
-PageName — description
-
-- Match pages SEMANTICALLY using name + description
-- If concept matches → reuse EXACT name
+- Create or update pages for distinct concepts
+- Match existing pages using name + description
+- If matched → MUST reuse exact name
 - If no match → create new page
 
 Naming:
 - CamelCase or single word only
-- No spaces, underscores, or symbols
-- Use standard terms
+- No spaces or symbols
+- No variations of existing names
 
-Do NOT:
-- create variations (plural/singular)
-- create duplicate or overlapping pages
+---
 
-Updating:
+## PAGE CONTENT
+
+Each page MUST follow:
+
+# PageName
+## Overview
+## Details
+## Examples
+
+Rules:
 - Append new information only
-- Do NOT rewrite or repeat existing content
-
-Decision:
-- If similar → reuse
-- If clearly new → create
-- If unsure → prefer reuse
+- Do NOT repeat existing content
+- Do NOT include empty sections
+- Use ONLY source content
 
 ---
 
 ## INDEX
 
-- Include exactly ONE "index" item
-- Must list ALL pages in this response:
-  - [[PageName]] — description
+- Include exactly ONE item with type="index"
+- It MUST include ALL pages in this response
+
+Format (one string per line):
+[[PageName]] — description
 
 ---
 
-## CONTENT QUALITY
+## PRIORITY
 
-- Each section must be detailed and explanatory
-- Each paragraph must explain:
-  - what it is
-  - how it works
-  - why it matters
-- Include examples if present
-- Use ONLY source content (no external knowledge)
-
----
-
-## PAGE STRUCTURE
-
-# Page Title
-## Overview
-## Details
-## Examples
-## See Also
-## Sources
-
----
-
-## FEW-SHOT BEHAVIOR EXAMPLES
-
-### Example 1 — Reuse Existing Page
-
-EXISTING PAGE NAMES:
-- GradientDescent
-
-SOURCE:
-"Gradient descent minimizes a loss function by iterative updates."
-
-OUTPUT:
-[
-    {
-        "type": "page",
-        "name": "GradientDescent",
-        "content": [
-            "# GradientDescent",
-            "## Details",
-            "Gradient descent is an optimization algorithm used to minimize a loss function by iteratively adjusting parameters. At each step, parameters move in the direction of the negative gradient, ensuring continuous reduction in loss.",
-            "It is widely used in machine learning because it enables efficient optimization across large datasets."
-        ]
-    },
-    {
-        "type": "index",
-        "content": "- [[GradientDescent]] — optimization method"
-    }
-]
-
----
-
-### Example 2 — Create New Page
-
-EXISTING PAGE NAMES:
-- NeuralNetwork
-
-SOURCE:
-"Backpropagation computes gradients in neural networks."
-
-OUTPUT:
-[
-    {
-        "type": "page",
-        "name": "Backpropagation",
-        "content": [
-            "# Backpropagation",
-            "## Overview",
-            "Backpropagation is a method used to compute gradients in neural networks, enabling weight updates during training. It allows models to reduce prediction error through iterative learning.",
-            "## Details",
-            "The algorithm propagates error backward through layers using the chain rule of calculus. This ensures each weight is adjusted based on its contribution to the final error."
-        ]
-    },
-    {
-        "type": "index",
-        "content": "- [[Backpropagation]] — gradient computation method"
-    }
-]
-
----
-
-
-### Example 3 — Avoid Duplicate
-
-EXISTING PAGE NAMES:
-- NeuralNetwork
-
-SOURCE:
-"Neural networks consist of layers of interconnected neurons."
-
-OUTPUT:
-[
-    {
-        "type": "page",
-        "name": "NeuralNetwork",
-        "content": [
-            "# NeuralNetwork",
-            "## Details",
-            "Neural networks are computational models composed of interconnected layers of neurons that process data through weighted connections. Each layer transforms input data into more abstract representations.",
-            "They are widely used in tasks such as image recognition, language processing, and predictive modeling."
-        ]
-    },
-    {
-        "type": "index",
-        "content": "- [[NeuralNetwork]] — computational model using neurons"
-    }
-]
-
-
-FINAL RULE (HIGHEST PRIORITY):
-Your response MUST be valid JSON.
-Even a single syntax error (missing colon, comma, quote) is unacceptable.
-If unsure, return [].
+1. Valid JSON
+2. Correct structure
+3. Page reuse (no duplicates)
+4. Content quality
 """
 
 
 SELECT_PAGES_SCHEMA = """
 TASK:
-Select up to {max_pages} most relevant page names needed to answer the question.
+Select up to {max_pages} most relevant page names needed to answer the question/relevant to the topic.
 
 RULES:
 - Only choose from the AVAILABLE PAGES list
@@ -396,4 +275,71 @@ Final Answer:
 Confidence Check:
 Completeness: High / Medium / Low
 Gaps: [state if synthesis was required or wiki was indirect]
+"""
+
+
+EXAMPLES = """
+### Example — Reuse Existing Page
+
+EXISTING:
+- GradientDescent — optimization algorithm
+
+SOURCE:
+"Gradient descent minimizes a loss function by iterative updates."
+
+OUTPUT:
+[
+    {
+        "type": "page",
+        "name": "GradientDescent",
+        "content": [
+            "# GradientDescent",
+            "## Overview",
+            "Gradient descent is an optimization algorithm used to minimize a loss function.",
+            "## Details",
+            "It works by iteratively updating parameters in the direction of the negative gradient, reducing loss over time.",
+            "## Examples",
+            "It is widely used in training machine learning models."
+        ]
+    },
+    {
+        "type": "index",
+        "content": [
+            "[[GradientDescent]] — optimization algorithm"
+        ]
+    }
+]
+
+---
+
+### Example — Create New Page
+
+EXISTING:
+- NeuralNetwork — computational model
+
+SOURCE:
+"Backpropagation computes gradients in neural networks."
+
+OUTPUT:
+[
+    {
+        "type": "page",
+        "name": "Backpropagation",
+        "content": [
+        "# Backpropagation",
+        "## Overview",
+        "Backpropagation is a method used to compute gradients in neural networks.",
+        "## Details",
+        "It propagates error backward through layers using the chain rule to update weights.",
+        "## Examples",
+        "Used during neural network training to reduce prediction error."
+        ]
+    },
+    {
+        "type": "index",
+        "content": [
+        "[[Backpropagation]] — gradient computation method"
+        ]
+    }
+]
 """

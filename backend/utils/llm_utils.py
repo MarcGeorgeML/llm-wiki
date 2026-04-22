@@ -36,8 +36,14 @@ def ask_ollama_stream(prompt: str, system: str = ""):
         "model": MODEL,
         "prompt": prompt,
         "system": system,
-        "stream": True
+        "stream": True,
+        "options": {
+            "temperature": 0.0,
+            "top_p": 1.0,
+            "top_k": 1
+        }
     }).encode()
+
     req = urllib.request.Request(OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=300) as r:
         for line in r:
