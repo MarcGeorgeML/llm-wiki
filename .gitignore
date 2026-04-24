@@ -9,3 +9,5 @@ wiki/**
 
 chroma_db/**
 !chroma_db!
+
+backend.zip

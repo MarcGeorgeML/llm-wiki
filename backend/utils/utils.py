@@ -85,14 +85,6 @@ class PDFService:
         return {p.stem: p for p in WIKI_DIR.rglob("*.md") if p.name != "index.md"}
 
 
-    def _get_index(self, WIKI_DIR) -> str:
-        path = WIKI_DIR / "index.md"
-        return path.read_text(encoding="utf-8") if path.exists() else ""
-
-
-    def set_stream(self, stream_fn):
-        self.stream_fn = stream_fn
-
     def parse_index_line(self, line: str) -> tuple[str, str] | None:
         if "[[" in line and "]] — " in line:
             name = line.split("[[")[1].split("]]")[0]

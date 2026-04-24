@@ -55,7 +55,7 @@ Return a JSON array. No code fences, no text outside the array.
 ## PAGE CONTENT RULES
 - Minimum 3-5 substantial paragraphs across Overview and Details
 - Include ALL relevant details — do not summarize or compress
-- When updating an existing page — append new sections, do not rewrite
+- When a page already exists in THIS PDF's wiki — append new sections, do not rewrite
 - Use ONLY source content — no outside knowledge
 """
 
@@ -78,7 +78,7 @@ INVALID: PageA, PageB or {{"pages": ["PageA"]}}
 
 EXAMPLES = """
 ### Example — Reuse Existing Page
-EXISTING:
+EXISTING (THIS PDF):
 [[GradientDescent]] — optimization algorithm
 
 SOURCE:
@@ -105,7 +105,7 @@ OUTPUT:
 ]
 
 ### Example — Create New Page
-EXISTING:
+EXISTING (THIS PDF):
 [[NeuralNetwork]] — computational model inspired by biological neurons
 
 SOURCE:
@@ -120,7 +120,7 @@ OUTPUT:
             "## Overview\\nBackpropagation is an algorithm used to compute gradients in neural networks by propagating error backward through layers.",
             "## Details\\nIt applies the chain rule of calculus to compute the gradient of the loss with respect to each weight. These gradients are then used by an optimizer to update the weights. The process runs after every forward pass during training.",
             "## Examples\\nAfter computing predictions and loss, backpropagation calculates how much each weight contributed to the error so weights can be adjusted accordingly.",
-            "## See Also\\n- [[GradientDescent]]",
+            "## See Also\\n- [[NeuralNetwork]]",
             "## Sources\\n- source.pdf"
         ]
     },
@@ -133,7 +133,7 @@ OUTPUT:
 ]
 
 ### Example — Multiple Pages from One Chunk
-EXISTING:
+EXISTING (THIS PDF):
 [[GradientDescent]] — optimization algorithm
 
 SOURCE:
@@ -168,23 +168,6 @@ OUTPUT:
         ]
     }
 ]
-"""
-
-
-SELECT_PAGES_SCHEMA_QUESTION = """
-Select up to {max_pages} most relevant pages to answer the question.
-
-RULES:
-- Choose ONLY from the AVAILABLE PAGES list
-- Use EXACT page names as given — do not modify
-- Rank by relevance, most relevant first
-- Prefer fewer highly relevant pages over many weak ones
-- Return empty list if nothing is relevant
-
-OUTPUT: JSON array of page name strings only. No text outside the array.
-
-VALID: ["GradientDescent", "Backpropagation"]
-INVALID: PageA, PageB or {{"pages": ["PageA"]}}
 """
 
 
@@ -227,20 +210,54 @@ OUTPUT: JSON array of pairs, or [] if none.
 """
 
 
-PRUNE_PROMPT = """
-You are a strict wiki maintainer comparing two wiki pages for redundancy.
+MERGE_PROMPT = """
+You are a strict wiki maintainer comparing two wiki pages.
 
 TASK:
-Decide if one page should be DELETED because its content is fully covered by the other.
+Determine if one page is largely subsumed by the other and should be merged.
+
+If YES:
+- Identify the PARENT page (the more comprehensive one)
+- Identify the CHILD page (the one to be merged and deleted)
+- Extract ONLY the UNIQUE content from the CHILD page (content not already present in the parent)
+- Return the content rewritten so it can be appended cleanly into the parent page
 
 RULES:
-- Only recommend deletion if one page is truly a subset of the other
-- If both contain unique content, return []
-- If deleting, return the name of the page to delete — keep the more comprehensive one
-- Be conservative — when in doubt, return []
+- Do NOT duplicate content already present in the parent
+- Preserve headings and structure from the child where possible
+- Do NOT summarize unique content
+- Do NOT include content already covered in the parent
+- Be conservative — if unsure, return []
 
-OUTPUT: JSON array with at most one page name, or [].
-["PageName"]
+IMPORTANT:
+Both pages come from the SAME source document. Do not assume relationships beyond these two pages.
+
+OUTPUT FORMAT (strict JSON):
+{
+    "parent": "PageA",
+    "child": "PageB",
+    "content": "markdown content to append"
+}
+
+OR:
+[]
+"""
+
+
+SELECT_PAGES_SCHEMA_QUESTION = """
+Select up to {max_pages} most relevant pages to answer the question.
+
+RULES:
+- Choose ONLY from the AVAILABLE PAGES list
+- Use EXACT page names as given — do not modify
+- Rank by relevance, most relevant first
+- Prefer fewer highly relevant pages over many weak ones
+- Return empty list if nothing is relevant
+
+OUTPUT: JSON array of page name strings only. No text outside the array.
+
+VALID: ["GradientDescent", "Backpropagation"]
+INVALID: PageA, PageB or {{"pages": ["PageA"]}}
 """
 
 

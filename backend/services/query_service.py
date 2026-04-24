@@ -10,6 +10,7 @@ class QueryService(PDFService):
 
     def __init__(self, WIKI_DIR: Path, stream_fn):
         self.WIKI_DIR = WIKI_DIR
+        self.INDEX_PATH = self.WIKI_DIR / "index.md"
         self.stream_fn = stream_fn
 
 
@@ -35,7 +36,7 @@ class QueryService(PDFService):
 
 
     def _build_prompt(self, query: str, selected_pages: list[str], source_name: str | None = None) -> str:
-        index = self._get_index(self.WIKI_DIR)
+        index = self.INDEX_PATH.read_text(encoding="utf-8")
         page_map = self._get_page_map(self.WIKI_DIR)
         pages_content = "\n\n".join(
             f"[PAGE: {name}]\n---\n{page_map[name].read_text(encoding='utf-8')}"
@@ -50,7 +51,7 @@ class QueryService(PDFService):
     def execute_query(self, query: str | None = None):
         if not query:
             return {"status": "error", "message": "No question provided"}
-        index = self._get_index(self.WIKI_DIR)
+        index = self.INDEX_PATH.read_text(encoding="utf-8")
         selected_pages = self._select_pages(query, index)
         print("Selected pages:", selected_pages)
         return self.stream_fn(self._build_prompt(query, selected_pages), system=QUESTION_SCHEMA)
@@ -60,7 +61,7 @@ class QueryService(PDFService):
         if not q_pdf:
             return {"status": "error", "message": "Missing PDF"}
         q_text = self.extract_pdf_text(q_pdf.read())
-        index = self._get_index(self.WIKI_DIR)
+        index = self.INDEX_PATH.read_text(encoding="utf-8")
         selected_pages = self._select_pages(q_text, index)
         print("Selected pages:", selected_pages)
         return self.stream_fn(self._build_prompt(q_text, selected_pages, source_name=q_pdf.name), system=QUESTION_SCHEMA)

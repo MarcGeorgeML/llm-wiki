@@ -80,11 +80,18 @@ async def upload_pdf(file: UploadFile = File(description="Upload a PDF file")):
 @app.post("/ingest")
 async def ingest_pdfs(model: ModelChoice = ModelChoice.ollama):
     app.state.ingestion.set_stream(ask_groq_stream if model == ModelChoice.groq else ask_ollama_stream)
-    pdfs = list(RAW_DIR.glob("*.pdf"))
+    pdfs = sorted(list(RAW_DIR.glob("*.pdf")))
     if not pdfs:
         return {"status": "error", "message": "No PDFs found in raw folder"}
-    results = [app.state.ingestion.execute(pdf.name, pdf.read_bytes()) for pdf in pdfs]
-    return JSONResponse(content = results)
+    results = {}
+    fail = []
+    for pdf in pdfs:
+        results[pdf.name] = app.state.ingestion.execute(pdf.name, pdf.read_bytes())
+        if results[pdf.name]["has_low_quality"]:
+            fail.append(pdf.name)
+        elif results[pdf.name]["status"] == "failed":
+            fail.append(pdf.name)
+    return JSONResponse(content = {"results": results, "failed files": fail})
 
 
 @app.post("/ingest/single")
