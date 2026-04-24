@@ -16,13 +16,13 @@ class CleanupService(PDFService):
 
 
     def _find_orphans(self, page_map: dict) -> set[str]:
-        all_links = set()
+        valid = set()
         for path in self.WIKI_DIR.rglob("*.md"):
             for line in path.read_text(encoding="utf-8").splitlines():
                 for link in line.split("[[")[1:]:
                     if "]]" in link:
-                        all_links.add(link.split("]]")[0])
-        return set(page_map.keys()) - all_links
+                        valid.add(link.split("]]")[0])
+        return set(page_map.keys()) - valid
 
 
     def execute(self):

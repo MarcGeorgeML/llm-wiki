@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import logging
 
 from schema import SCHEMA, INGESTION_PROMPT, SELECT_PAGES_SCHEMA_INGESTION, EXAMPLES
 from utils.utils import PDFService
@@ -11,6 +12,13 @@ class IngestionService(PDFService):
         self.WIKI_DIR = WIKI_DIR
         self.RAW_DIR = RAW_DIR
         self.stream_fn = stream_fn
+        
+        self.logger = logging.getLogger("wiki.ingestion")
+        if not self.logger.handlers:
+            handler = logging.FileHandler(WIKI_DIR / "log.md", encoding="utf-8")
+            handler.setFormatter(logging.Formatter("- %(asctime)s — %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+            self.logger.addHandler(handler)
+            self.logger.setLevel(logging.INFO)
 
 
     def set_stream(self, stream_fn):
@@ -26,11 +34,11 @@ class IngestionService(PDFService):
             selected = json.loads(response)
         except Exception:
             return []
-        valid = {
-            line.split("[[")[1].split("]]")[0]
-            for line in index.splitlines()
-            if "[[" in line
-        }
+        valid = set()
+        for line in index.splitlines():
+            parsed = self.parse_index_line(line)
+            if parsed:
+                valid.add(parsed[0])
         return [p for p in selected if p in valid]
 
 
@@ -51,13 +59,15 @@ class IngestionService(PDFService):
     def _write_pages(self, pages: list[dict], page_map: dict[str, Path]) -> None:
         self.WIKI_DIR.mkdir(parents=True, exist_ok=True)
         index_updates = {}
+        
 
         for page in pages:
             if page["path"] == "index":
                 for line in page["content"]:
-                    if "]] — " in line:
-                        name, desc = line.split("]] — ", 1)
-                        index_updates[name.replace("[[", "").strip()] = desc.strip()
+                    parsed = self.parse_index_line(line)
+                    if parsed:
+                        name, desc = parsed
+                        index_updates[name] = desc
                 continue
 
             name = page["path"]
@@ -76,6 +86,8 @@ class IngestionService(PDFService):
                 else ""
             )
             path.write_text(existing + new_content, encoding="utf-8")
+            folder = path.parent.name
+            self.logger.info("%s/%s", folder, name)
 
         if not index_updates:
             return
@@ -84,9 +96,10 @@ class IngestionService(PDFService):
         existing = {}
         if index_path.exists():
             for line in index_path.read_text(encoding="utf-8").splitlines():
-                if "]] — " in line:
-                    name, desc = line.split("]] — ", 1)
-                    existing[name.replace("[[", "").strip()] = desc.strip()
+                parsed = self.parse_index_line(line)
+                if parsed:
+                    name, desc = parsed
+                    existing[name] = desc
         existing.update(index_updates)
         index_path.write_text(
             "\n".join(f"[[{k}]] — {v}" for k, v in sorted(existing.items())),

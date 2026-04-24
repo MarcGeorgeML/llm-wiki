@@ -26,10 +26,11 @@ class QueryService(PDFService):
             selected = json.loads(response)
         except Exception:
             return []
-        valid = {
-            line.split("[[")[1].split("]]")[0]
-            for line in index.splitlines() if "[[" in line
-        }
+        valid = set()
+        for line in index.splitlines():
+            parsed = self.parse_index_line(line)
+            if parsed:
+                valid.add(parsed[0])
         return [p for p in selected if p in valid][:max_pages]
 
 

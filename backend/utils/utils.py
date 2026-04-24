@@ -93,3 +93,9 @@ class PDFService:
     def set_stream(self, stream_fn):
         self.stream_fn = stream_fn
 
+    def parse_index_line(self, line: str) -> tuple[str, str] | None:
+        if "[[" in line and "]] — " in line:
+            name = line.split("[[")[1].split("]]")[0]
+            desc = line.split("]] — ", 1)[1].strip()
+            return name, desc
+        return None
