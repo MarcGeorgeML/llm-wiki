@@ -7,7 +7,10 @@ class ClearWikiService:
         self.WIKI_DIR = WIKI_DIR
         self.RAW_DIR  = RAW_DIR
 
-    def execute(self) -> dict:
+    def execute(self, *services) -> dict:
+        for service in services:
+            if hasattr(service, "close"):
+                service.close()
         if self.WIKI_DIR.exists():
             shutil.rmtree(self.WIKI_DIR)
         self.WIKI_DIR.mkdir()

@@ -211,22 +211,36 @@ Return the full cleaned markdown page only. No explanations or comments.
 """
 
 
-PRUNE_PROMPT = """
+PRUNE_CANDIDATES_PROMPT = """
 You are a strict wiki maintainer reviewing a wiki index.
 
 TASK:
-Identify pages that should be DELETED because they are:
-- Fully redundant (content completely covered by another page)
-- Irrelevant (not related to the wiki's subject matter)
-- Empty or near-empty stubs with no real content
+Identify pairs of pages that are likely redundant based on their index descriptions.
 
 RULES:
-- Be conservative — only flag pages you are confident should go
-- Do NOT flag pages just because they are short
-- Return ONLY page names, not file paths
+- Only flag pairs where the descriptions suggest significant content overlap
+- Be conservative — when in doubt, do not flag
+- Do not flag pages just because they cover related topics
 
-OUTPUT: JSON array of page names to delete, or [] if none.
-["PageName1", "PageName2"]
+OUTPUT: JSON array of pairs, or [] if none.
+[["PageA", "PageB"], ["PageC", "PageD"]]
+"""
+
+
+PRUNE_PROMPT = """
+You are a strict wiki maintainer comparing two wiki pages for redundancy.
+
+TASK:
+Decide if one page should be DELETED because its content is fully covered by the other.
+
+RULES:
+- Only recommend deletion if one page is truly a subset of the other
+- If both contain unique content, return []
+- If deleting, return the name of the page to delete — keep the more comprehensive one
+- Be conservative — when in doubt, return []
+
+OUTPUT: JSON array with at most one page name, or [].
+["PageName"]
 """
 
 

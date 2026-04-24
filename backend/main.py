@@ -17,7 +17,7 @@ from utils.llm_utils import ask_ollama_stream, ask_groq_stream
 
 
 from services.ingestion_service import IngestionService
-from services.cleanup_service import CleanupService
+from services.linter import Linter
 from services.clear_wiki import ClearWikiService
 from services.query_service import QueryService
 from services.wiki_service import WikiService
@@ -35,9 +35,9 @@ async def lifespan(app: FastAPI):
     app.state.ingestion = IngestionService(
         WIKI_DIR = WIKI_DIR,
         RAW_DIR = RAW_DIR,
-        stream_fn = ask_ollama_stream # default to local model for ingestion
+        stream_fn = ask_ollama_stream 
     )
-    app.state.cleanup_service = CleanupService(WIKI_DIR, stream_fn = ask_ollama_stream)
+    app.state.linter = Linter(WIKI_DIR, stream_fn = ask_ollama_stream)
 
     app.state.query_service = QueryService(
         WIKI_DIR = WIKI_DIR,
@@ -100,8 +100,8 @@ async def ingest_single_pdf(file: UploadFile = File(description="Upload a PDF fi
 
 @app.post("/lint")
 async def lint_wiki(model: ModelChoice = ModelChoice.ollama):
-    app.state.cleanup_service.set_stream(ask_groq_stream if model == ModelChoice.groq else ask_ollama_stream)
-    result = app.state.cleanup_service.execute()
+    app.state.linter.set_stream(ask_groq_stream if model == ModelChoice.groq else ask_ollama_stream)
+    result = app.state.linter.execute()
     return JSONResponse(content=result)
 
 
@@ -150,5 +150,5 @@ def get_page(page_name: str, download: bool = False):
 
 @app.delete("/wiki/clear")
 def clear_wiki():
-    result = app.state.clear_wiki.execute()
+    result = app.state.clear_wiki.execute(app.state.ingestion, app.state.linter)
     return JSONResponse(content=result)

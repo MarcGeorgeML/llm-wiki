@@ -54,7 +54,7 @@ class PDFService:
         return "\n\n---PAGE_BREAK---\n\n".join(pages_text)
 
 
-    def chunk_text(self, text: str, max_chars: int = 6000) -> list[str]:
+    def chunk_text(self, text: str, max_chars: int = 3500) -> list[str]:
         pages = text.split("\n\n---PAGE_BREAK---\n\n")
         if len(text) <= max_chars:
             return [text]
@@ -99,3 +99,5 @@ class PDFService:
             desc = line.split("]] — ", 1)[1].strip()
             return name, desc
         return None
+    
+    
