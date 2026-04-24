@@ -84,8 +84,7 @@ async def ingest_pdfs(model: ModelChoice = ModelChoice.ollama):
     if not pdfs:
         return {"status": "error", "message": "No PDFs found in raw folder"}
     results = [app.state.ingestion.execute(pdf.name, pdf.read_bytes()) for pdf in pdfs]
-    cleaned = app.state.cleanup_service.execute()
-    return JSONResponse(content={"ingest": results, "cleanup": cleaned})
+    return JSONResponse(content = results)
 
 
 @app.post("/ingest/single")
@@ -96,8 +95,7 @@ async def ingest_single_pdf(file: UploadFile = File(description="Upload a PDF fi
     dest.write_bytes(pdf_bytes)
     app.state.ingestion.set_stream(ask_groq_stream if model == ModelChoice.groq else ask_ollama_stream)
     result = app.state.ingestion.execute(file.filename, pdf_bytes)
-    cleaned = app.state.cleanup_service.execute()
-    return JSONResponse(content={"ingest": [result], "cleanup": cleaned})
+    return JSONResponse(content = result)
 
 
 @app.post("/lint")
