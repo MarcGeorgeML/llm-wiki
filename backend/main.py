@@ -1,4 +1,5 @@
 import os
+
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 
 
@@ -9,7 +10,12 @@ from enum import Enum
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Form, UploadFile, File
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse, PlainTextResponse
+from fastapi.responses import (
+    JSONResponse,
+    StreamingResponse,
+    FileResponse,
+    PlainTextResponse,
+)
 from pydantic import BaseModel
 
 
@@ -17,48 +23,41 @@ from utils.llm_utils import ask_ollama_stream, ask_groq_stream
 
 
 from services.ingestion_service import IngestionService
-from services.linter import Linter
+from services.linter_service import LinterService
 from services.clear_wiki import ClearWikiService
 from services.query_service import QueryService
 from services.wiki_service import WikiService
 
 
-BASE_DIR  = Path(__file__).parent.parent
-WIKI_DIR  = BASE_DIR / "wiki"
-RAW_DIR   = BASE_DIR / "raw"
-CHROMA_DIR = BASE_DIR / "chroma_db"
+BASE_DIR = Path(__file__).parent.parent
+WIKI_DIR = BASE_DIR / "wiki"
+RAW_DIR = BASE_DIR / "raw"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    
+
     app.state.ingestion = IngestionService(
-        WIKI_DIR = WIKI_DIR,
-        RAW_DIR = RAW_DIR,
-        stream_fn = ask_ollama_stream 
+        WIKI_DIR=WIKI_DIR, RAW_DIR=RAW_DIR, stream_fn=ask_ollama_stream
     )
-    app.state.linter = Linter(WIKI_DIR, stream_fn = ask_ollama_stream)
+    app.state.linter = LinterService(WIKI_DIR, stream_fn=ask_ollama_stream)
 
     app.state.query_service = QueryService(
-        WIKI_DIR = WIKI_DIR,
-        stream_fn = ask_ollama_stream
+        WIKI_DIR=WIKI_DIR, stream_fn=ask_ollama_stream
     )
-    app.state.wiki_service = WikiService(
-        WIKI_DIR = WIKI_DIR
-    )
-    
-    app.state.clear_wiki = ClearWikiService(
-        WIKI_DIR = WIKI_DIR,
-        RAW_DIR  = RAW_DIR
-    )
+    app.state.wiki_service = WikiService(WIKI_DIR=WIKI_DIR)
+
+    app.state.clear_wiki = ClearWikiService(WIKI_DIR=WIKI_DIR, RAW_DIR=RAW_DIR)
     yield
 
 
 app = FastAPI(lifespan=lifespan)
 
+
 class ModelChoice(str, Enum):
     ollama = "ollama"
-    groq   = "groq"
+    groq = "groq"
+
 
 class QueryRequest(BaseModel):
     query: str
@@ -79,51 +78,73 @@ async def upload_pdf(file: UploadFile = File(description="Upload a PDF file")):
 
 @app.post("/ingest")
 async def ingest_pdfs(model: ModelChoice = ModelChoice.ollama):
-    app.state.ingestion.set_stream(ask_groq_stream if model == ModelChoice.groq else ask_ollama_stream)
+    app.state.ingestion.set_stream(
+        ask_groq_stream if model == ModelChoice.groq else ask_ollama_stream
+    )
     pdfs = sorted(list(RAW_DIR.glob("*.pdf")))
     if not pdfs:
         return {"status": "error", "message": "No PDFs found in raw folder"}
     results = {}
-    fail = []
+    failed = []
+    low_quality = []
     for pdf in pdfs:
-        results[pdf.name] = app.state.ingestion.execute(pdf.name, pdf.read_bytes())
-        if results[pdf.name]["has_low_quality"]:
-            fail.append(pdf.name)
-        elif results[pdf.name]["status"] == "failed":
-            fail.append(pdf.name)
-    return JSONResponse(content = {"results": results, "failed files": fail})
+        res = app.state.ingestion.execute(pdf.name, pdf.read_bytes())
+        results[pdf.name] = res
+        if res["status"] == "failed":
+            failed.append(pdf.name)
+        if res["has_low_quality"]:
+            low_quality.append(pdf.name)
+    return JSONResponse(content={"results": results, "failed files": failed, "low quality files": low_quality})
 
 
 @app.post("/ingest/single")
-async def ingest_single_pdf(file: UploadFile = File(description="Upload a PDF file"), model: ModelChoice = ModelChoice.ollama):
+async def ingest_single_pdf(
+    file: UploadFile = File(description="Upload a PDF file"),
+    model: ModelChoice = ModelChoice.ollama,
+):
     RAW_DIR.mkdir(exist_ok=True)
     dest = RAW_DIR / cast(str, file.filename)
     pdf_bytes = await file.read()
     dest.write_bytes(pdf_bytes)
-    app.state.ingestion.set_stream(ask_groq_stream if model == ModelChoice.groq else ask_ollama_stream)
+    app.state.ingestion.set_stream(
+        ask_groq_stream if model == ModelChoice.groq else ask_ollama_stream
+    )
     result = app.state.ingestion.execute(file.filename, pdf_bytes)
-    return JSONResponse(content = result)
+    return JSONResponse(content={
+        "result": result,
+        "failed": result["status"] == "failed",
+        "low_quality": result["has_low_quality"]
+    })
 
 
 @app.post("/lint")
 async def lint_wiki(model: ModelChoice = ModelChoice.ollama):
-    app.state.linter.set_stream(ask_groq_stream if model == ModelChoice.groq else ask_ollama_stream)
+    app.state.linter.set_stream(
+        ask_groq_stream if model == ModelChoice.groq else ask_ollama_stream
+    )
     result = app.state.linter.execute()
     return JSONResponse(content=result)
 
 
 @app.post("/query/simple")
-async def query_simple(req: QueryRequest, model: ModelChoice = Form(ModelChoice.ollama),):
+async def query_simple(
+    req: QueryRequest,
+    model: ModelChoice = ModelChoice.ollama,
+):
     stream_fn = ask_groq_stream if model == ModelChoice.groq else ask_ollama_stream
     app.state.query_service.set_stream(stream_fn)
-    result = app.state.query_service.execute_query(query=req.query,)
+    result = app.state.query_service.execute_query(
+        query=req.query,
+    )
     if isinstance(result, dict):
         return result
     return StreamingResponse(result, media_type="text/plain")
 
 
 @app.post("/query/pdf")
-async def query_pdf(q_pdf: UploadFile = File(...), model: ModelChoice = Form(ModelChoice.ollama)):
+async def query_pdf(
+    q_pdf: UploadFile = File(...), model: ModelChoice = Form(ModelChoice.ollama)
+):
     stream_fn = ask_groq_stream if model == ModelChoice.groq else ask_ollama_stream
     app.state.query_service.set_stream(stream_fn)
     result = app.state.query_service.execute_pdf(q_pdf=q_pdf)
@@ -144,14 +165,9 @@ def get_page(page_name: str, download: bool = False):
     if not path:
         return {"status": "error", "message": f"Page '{page_name}' not found"}
     if download:
-        return FileResponse(
-            path=path,
-            media_type="text/markdown",
-            filename=path.name
-        )
+        return FileResponse(path=path, media_type="text/markdown", filename=path.name)
     return PlainTextResponse(
-        path.read_text(encoding="utf-8"),
-        media_type="text/markdown"
+        path.read_text(encoding="utf-8"), media_type="text/markdown"
     )
 
 

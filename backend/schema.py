@@ -173,75 +173,56 @@ OUTPUT:
 
 CLEANUP_PROMPT = """
 You are a strict wiki maintainer performing a full lint pass on a single wiki page.
-
 You are given the full wiki index so you know what other pages exist.
-
 TASKS — check and fix ALL of the following:
+- If the page contains multiple sections separated by --- (merge artifacts), combine them into a single coherent page
+- Combine duplicate or near-duplicate sections under one heading
 - Remove duplicated or near-duplicated content within this page
 - Add [[WikiLink]] cross-references to related pages that exist in the index but aren't linked yet
 - If a section clearly belongs to a different existing wiki page, remove it from here
-- Flag any claims that contradict other pages with a inline note: > ⚠️ Possible contradiction with [[PageName]]
-- Flag any important concept that is mentioned but has no wiki page yet with: > 💡 Missing page: ConceptName
-
 RULES:
 - Do NOT summarize or shorten unique content
 - Do NOT rephrase unless merging duplicates
-- Preserve all section headings exactly
+- Preserve all section headings exactly — but merge duplicate headings into one
 - Keep examples and sources exactly as written
-
+- The final page must read as a single coherent document with no --- dividers
 OUTPUT:
 Return the full cleaned markdown page only. No explanations or comments.
 """
 
 
-PRUNE_CANDIDATES_PROMPT = """
-You are a strict wiki maintainer reviewing a wiki index.
+# MERGE_PROMPT = """
+# You are a strict wiki maintainer comparing two wiki pages.
 
-TASK:
-Identify pairs of pages that are likely redundant based on their index descriptions.
+# TASK:
+# Determine if one page is largely subsumed by the other and should be merged.
 
-RULES:
-- Only flag pairs where the descriptions suggest significant content overlap
-- Be conservative — when in doubt, do not flag
-- Do not flag pages just because they cover related topics
+# If YES:
+# - Identify the PARENT page (the more comprehensive one)
+# - Identify the CHILD page (the one to be merged and deleted)
+# - Extract ONLY the UNIQUE content from the CHILD page (content not already present in the parent)
+# - Return the content rewritten so it can be appended cleanly into the parent page
 
-OUTPUT: JSON array of pairs, or [] if none.
-[["PageA", "PageB"], ["PageC", "PageD"]]
-"""
+# RULES:
+# - Do NOT duplicate content already present in the parent
+# - Preserve headings and structure from the child where possible
+# - Do NOT summarize unique content
+# - Do NOT include content already covered in the parent
+# - Be conservative — if unsure, return []
 
+# IMPORTANT:
+# Both pages come from the SAME source document. Do not assume relationships beyond these two pages.
 
-MERGE_PROMPT = """
-You are a strict wiki maintainer comparing two wiki pages.
+# OUTPUT FORMAT (strict JSON):
+# {
+#     "parent": "PageA",
+#     "child": "PageB",
+#     "content": "markdown content to append"
+# }
 
-TASK:
-Determine if one page is largely subsumed by the other and should be merged.
-
-If YES:
-- Identify the PARENT page (the more comprehensive one)
-- Identify the CHILD page (the one to be merged and deleted)
-- Extract ONLY the UNIQUE content from the CHILD page (content not already present in the parent)
-- Return the content rewritten so it can be appended cleanly into the parent page
-
-RULES:
-- Do NOT duplicate content already present in the parent
-- Preserve headings and structure from the child where possible
-- Do NOT summarize unique content
-- Do NOT include content already covered in the parent
-- Be conservative — if unsure, return []
-
-IMPORTANT:
-Both pages come from the SAME source document. Do not assume relationships beyond these two pages.
-
-OUTPUT FORMAT (strict JSON):
-{
-    "parent": "PageA",
-    "child": "PageB",
-    "content": "markdown content to append"
-}
-
-OR:
-[]
-"""
+# OR:
+# []
+# """
 
 
 SELECT_PAGES_SCHEMA_QUESTION = """

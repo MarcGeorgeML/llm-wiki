@@ -1,22 +1,23 @@
-
-import os
-from pathlib import Path
 import pymupdf as fitz
-import easyocr
-import numpy as np
 from PIL import Image
 import io
 import cv2
-from dotenv import load_dotenv
-load_dotenv()
+import numpy as np
+import easyocr
+import os
 
+
+from dotenv import load_dotenv
+
+load_dotenv()
 OCR_GPU = os.getenv("OCR_GPU", "True").lower()
 OCR_GPU = True if OCR_GPU == "true" else False
 
 
-reader = easyocr.Reader(['en'], gpu=OCR_GPU)
+reader = easyocr.Reader(["en"], gpu=OCR_GPU)
 
-class PDFService:
+
+class OCRService:
 
     def extract_pdf_text(self, pdf_bytes: bytes) -> str:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -33,7 +34,9 @@ class PDFService:
                     img_arr = np.array(img)
                 except Exception:
                     try:
-                        img_arr = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
+                        img_arr = cv2.imdecode(
+                            np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR
+                        )
                     except Exception:
                         img_arr = np.frombuffer(img_bytes, dtype=np.uint8)
                 try:
@@ -52,7 +55,6 @@ class PDFService:
                 if ocr:
                     pages_text.append(ocr)
         return "\n\n---PAGE_BREAK---\n\n".join(pages_text)
-
 
     def chunk_text(self, text: str, max_chars: int = 3500) -> list[str]:
         pages = text.split("\n\n---PAGE_BREAK---\n\n")
@@ -79,17 +81,3 @@ class PDFService:
         if current:
             chunks.append("\n\n".join(current))
         return chunks
-
-
-    def _get_page_map(self, WIKI_DIR) -> dict[str, Path]:
-        return {p.stem: p for p in WIKI_DIR.rglob("*.md") if p.name != "index.md"}
-
-
-    def parse_index_line(self, line: str) -> tuple[str, str] | None:
-        if "[[" in line and "]] — " in line:
-            name = line.split("[[")[1].split("]]")[0]
-            desc = line.split("]] — ", 1)[1].strip()
-            return name, desc
-        return None
-    
-    
