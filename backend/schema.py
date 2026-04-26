@@ -1,64 +1,3 @@
-SCHEMA = """
-You are a strict wiki maintainer. You only work with the content provided to you.
-
-STRICT RULES:
-- ONLY use information from the source content or existing wiki pages provided
-- Do NOT use training knowledge to fill gaps
-- Do NOT infer, extrapolate, or guess beyond what is written
-- Every claim must be traceable to a specific page or source
-
-Your job is to extract and organize knowledge from the source into wiki pages.
-"""
-
-
-INGESTION_PROMPT = """
-## TASK
-Convert source text into structured wiki pages. Output ONLY valid JSON.
-
-## OUTPUT FORMAT
-Return a JSON array. No code fences, no text outside the array.
-
-[
-    {
-        "type": "page",
-        "name": "PageName",
-        "content": [
-            "## Overview\\n[2-3 sentence definition from source]",
-            "## Details\\n[comprehensive explanation]",
-            "## Examples\\n[concrete examples if available]",
-            "## See Also\\n- [[RelatedPage]]",
-            "## Sources\\n- filename"
-        ]
-    },
-    {
-        "type": "index",
-        "content": [
-            "[[PageName]] — one line description",
-            "[[AnotherPage]] — one line description"
-        ]
-    }
-]
-
-## RULES
-- "type" is either "page" or "index"
-- "name" is CamelCase, no spaces or symbols
-- "content" is a list of strings — one string per section
-- Include exactly ONE "index" entry covering ALL pages in this response
-- Omit empty sections entirely
-- If unsure → return []
-
-## PAGE NAMING
-- Reuse exact name if concept matches an existing wiki page
-- No variations of existing names (REST not RestAPI)
-- Use the most widely accepted standard term
-
-## PAGE CONTENT RULES
-- Minimum 3-5 substantial paragraphs across Overview and Details
-- Include ALL relevant details — do not summarize or compress
-- When a page already exists in THIS PDF's wiki — append new sections, do not rewrite
-- Use ONLY source content — no outside knowledge
-"""
-
 SELECT_PAGES_SCHEMA_INGESTION = """
 You are selecting existing wiki pages that should be UPDATED with new source content.
 
@@ -76,68 +15,33 @@ INVALID: PageA, PageB or {{"pages": ["PageA"]}}
 """
 
 
+INGESTION_PROMPT = """
+Convert source text into wiki pages. Output ONLY a valid JSON array. No code fences, no text outside the array.
+
+RULES:
+- "type" is "page" or "index"
+- "name" is CamelCase, no spaces or symbols
+- "content" is a list of strings, one per section
+- Include exactly ONE "index" entry covering ALL pages
+- Omit empty sections
+- If unsure → return []
+
+PAGE NAMING:
+- Reuse exact name if concept matches existing page
+- Use the most widely accepted standard term
+
+PAGE CONTENT:
+- Minimum 3-5 substantial paragraphs in Overview and Details
+- Include ALL relevant details, do not summarize
+- Use ONLY source content, no outside knowledge
+"""
+
+
 EXAMPLES = """
-### Example — Reuse Existing Page
-EXISTING (THIS PDF):
-[[GradientDescent]] — optimization algorithm
+EXAMPLE:
+EXISTING: [[GradientDescent]] — optimization algorithm
 
-SOURCE:
-"Gradient descent minimizes a loss function by iterative updates."
-
-OUTPUT:
-[
-    {
-        "type": "page",
-        "name": "GradientDescent",
-        "content": [
-            "## Overview\\nGradient descent is an optimization algorithm used to minimize a loss function by iteratively updating model parameters.",
-            "## Details\\nIt works by computing the gradient of the loss function with respect to each parameter and updating in the direction of the negative gradient. This repeats until the loss converges. The learning rate controls the size of each update step.",
-            "## Examples\\nUsed in training neural networks where weights are updated after each batch using computed gradients.",
-            "## Sources\\n- source.pdf"
-        ]
-    },
-    {
-        "type": "index",
-        "content": [
-            "[[GradientDescent]] — optimization algorithm that minimizes loss functions through iterative parameter updates"
-        ]
-    }
-]
-
-### Example — Create New Page
-EXISTING (THIS PDF):
-[[NeuralNetwork]] — computational model inspired by biological neurons
-
-SOURCE:
-"Backpropagation computes gradients in neural networks using the chain rule."
-
-OUTPUT:
-[
-    {
-        "type": "page",
-        "name": "Backpropagation",
-        "content": [
-            "## Overview\\nBackpropagation is an algorithm used to compute gradients in neural networks by propagating error backward through layers.",
-            "## Details\\nIt applies the chain rule of calculus to compute the gradient of the loss with respect to each weight. These gradients are then used by an optimizer to update the weights. The process runs after every forward pass during training.",
-            "## Examples\\nAfter computing predictions and loss, backpropagation calculates how much each weight contributed to the error so weights can be adjusted accordingly.",
-            "## See Also\\n- [[NeuralNetwork]]",
-            "## Sources\\n- source.pdf"
-        ]
-    },
-    {
-        "type": "index",
-        "content": [
-            "[[Backpropagation]] — algorithm for computing gradients in neural networks using the chain rule"
-        ]
-    }
-]
-
-### Example — Multiple Pages from One Chunk
-EXISTING (THIS PDF):
-[[GradientDescent]] — optimization algorithm
-
-SOURCE:
-"Adam optimizer adapts learning rates per parameter. Dropout randomly disables neurons during training to prevent overfitting."
+SOURCE: "Adam optimizer adapts learning rates per parameter. Dropout randomly disables neurons during training."
 
 OUTPUT:
 [
@@ -146,7 +50,7 @@ OUTPUT:
         "name": "AdamOptimizer",
         "content": [
             "## Overview\\nAdam is an adaptive optimization algorithm that maintains individual learning rates for each model parameter.",
-            "## Details\\nIt combines momentum and RMSProp by tracking both the first and second moments of gradients. This allows it to adapt the learning rate per parameter throughout training, making it effective across a wide range of architectures.",
+            "## Details\\nIt combines momentum and RMSProp by tracking both the first and second moments of gradients.",
             "## See Also\\n- [[GradientDescent]]",
             "## Sources\\n- source.pdf"
         ]
@@ -155,8 +59,8 @@ OUTPUT:
         "type": "page",
         "name": "Dropout",
         "content": [
-            "## Overview\\nDropout is a regularization technique that randomly disables a subset of neurons during each training step.",
-            "## Details\\nBy randomly zeroing neuron outputs, dropout prevents the network from relying too heavily on any single neuron, reducing overfitting. It is only applied during training — at inference all neurons are active.",
+            "## Overview\\nDropout is a regularization technique that randomly disables a subset of neurons during training.",
+            "## Details\\nBy randomly zeroing neuron outputs, dropout prevents overfitting. It is only applied during training.",
             "## Sources\\n- source.pdf"
         ]
     },

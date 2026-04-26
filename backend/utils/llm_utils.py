@@ -10,7 +10,7 @@ load_dotenv()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
-MODEL = os.getenv("MODEL", "gemma3:12b")
+MODEL = os.getenv("MODEL", "qwen2.5:7b-instruct-q4_K_M")
 
 
 def ask_groq_stream(prompt: str, system: str = ""):
@@ -40,7 +40,13 @@ def ask_ollama_stream(prompt: str, system: str = ""):
             "prompt": prompt,
             "system": system,
             "stream": True,
-            "options": {"temperature": 0.0, "top_p": 1.0, "top_k": 1},
+            "options": {
+                "temperature": 0.0,
+                "top_p": 1.0,
+                "top_k": 1,
+                "num_batch": 1024,
+                "num_ctx": 4096,
+            },
         }
     ).encode()
 

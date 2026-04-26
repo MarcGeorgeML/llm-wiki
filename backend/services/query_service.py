@@ -15,24 +15,14 @@ class QueryService(BaseService):
     def __init__(self, WIKI_DIR: Path, stream_fn):
         super().__init__(WIKI_DIR, stream_fn)
 
-    def _get_index(self) -> str:
-        return self.INDEX_PATH.read_text(encoding="utf-8") if self.INDEX_PATH.exists() else ""
-
-    def _select_pages(self, query: str, index: str, max_pages: int = 5) -> list[str]:
-        if not index:
+    def _select_wiki_pages(self, query: str, index: str, max_pages: int = 5) -> list[str]:
+        valid = [parsed[0] for line in index.splitlines() if (parsed := self.parse_index_line(line))]
+        if not valid:
             return []
-        valid = {
-            parsed[0]
-            for line in index.splitlines()
-            if (parsed := self.parse_index_line(line))
-        }
-        prompt = f"QUESTION:\n{query}\n\nAVAILABLE PAGES:\n{index}"
-        return super()._select_pages(
-            prompt,
-            SELECT_PAGES_SCHEMA_QUESTION.format(max_pages=max_pages),
-            valid,
-            max_pages,
-        )
+        top = self._top_k_pages(query, valid, k=20)  # pre-filter to top 20
+        filtered_index = "\n".join(f"[[{p}]] — {self.index_map.get(p, p)}" for p in top)
+        prompt = f"QUESTION:\n{query}\n\nAVAILABLE PAGES:\n{filtered_index}"
+        return super()._select_pages(prompt, SELECT_PAGES_SCHEMA_QUESTION.format(max_pages=max_pages), set(top), max_pages)
 
     def _build_prompt(
         self, query: str, selected_pages: list[str], source_name: str | None = None
@@ -60,21 +50,32 @@ class QueryService(BaseService):
     def execute_query(self, query: str | None = None):
         if not query:
             return {"status": "error", "message": "No question provided"}
-        index = self._get_index()
-        selected_pages = self._select_pages(query, index)
+        self.index_map = self._get_index_map()
+        index = self.INDEX_PATH.read_text(encoding="utf-8") if self.INDEX_PATH.exists() else ""
+        selected_pages = self._select_wiki_pages(query, index)
         print("Selected pages:", selected_pages)
-        return self.stream_fn(
-            self._build_prompt(query, selected_pages), system=QUESTION_SCHEMA
-        )
+        return {
+            "result": self.stream_fn(
+                self._build_prompt(query, selected_pages),
+                system=QUESTION_SCHEMA
+            ),
+            "selected_pages": selected_pages,
+        }
 
-    def execute_pdf(self, q_pdf: Any | None = None):
+    async def execute_pdf(self, q_pdf: Any | None = None):
         if not q_pdf:
             return {"status": "error", "message": "Missing PDF"}
-        q_text = self.extract_pdf_text(q_pdf.read())
-        index = self._get_index()
-        selected_pages = self._select_pages(q_text, index)
+        self.index_map = self._get_index_map()
+        q_text, failed_pages = self.extract_pdf_text(await q_pdf.read())
+        index = self.INDEX_PATH.read_text(encoding="utf-8") if self.INDEX_PATH.exists() else ""
+        selected_pages = self._select_wiki_pages(q_text, index)
         print("Selected pages:", selected_pages)
-        return self.stream_fn(
-            self._build_prompt(q_text, selected_pages, source_name=q_pdf.name),
-            system=QUESTION_SCHEMA,
-        )
+        print("Number of failed pages:", failed_pages)
+        return {
+            "result": self.stream_fn(
+                self._build_prompt(q_text, selected_pages, source_name=q_pdf.name),
+                system=QUESTION_SCHEMA
+            ),
+            "selected_pages": selected_pages,
+            "number_of_pages_not_read_from_question_paper": failed_pages,
+        }

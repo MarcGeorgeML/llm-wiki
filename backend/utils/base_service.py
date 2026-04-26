@@ -18,6 +18,7 @@ class BaseService(FileService, OCRService):
         self.stream_fn = stream_fn
 
     def _setup_logger(self, logger: logging.Logger, label: str) -> None:
+        self.SESSION_DIR.mkdir(parents=True, exist_ok=True)
         if not logger.handlers:
             handler = logging.FileHandler(self.LOG_PATH, mode="a", encoding="utf-8")
             handler.setFormatter(
@@ -27,9 +28,10 @@ class BaseService(FileService, OCRService):
             )
             logger.addHandler(handler)
             logger.setLevel(logging.INFO)
-        logger.info(
-            "=== %s %s ===", label, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        )
+
+        # write header without formatter
+        with open(self.LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"=== {label} ===\n")
 
     def _select_pages(
         self, prompt: str, system: str, valid: set[str], max_pages: int | None = None
@@ -44,7 +46,16 @@ class BaseService(FileService, OCRService):
         result = [p for p in selected if p in valid]
         return result[:max_pages] if max_pages else result
 
+    def _top_k_pages(self, text: str, pages: list[str], k: int = 10) -> list[str]:
+        text_words = set(text.lower().split())
+        scored = sorted(
+            [(len(text_words & set((self.index_map.get(p) or p).lower().split())), p) for p in pages],
+            reverse=True
+        )
+        return [p for score, p in scored[:k] if score > 0]
+
     def close(self) -> None:
+        self.logger.info("=== SESSION END ===\n\n\n")
         for handler in self.logger.handlers[:]:
             handler.close()
             self.logger.removeHandler(handler)

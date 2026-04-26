@@ -1,5 +1,4 @@
 from pathlib import Path
-import json
 import logging
 
 
@@ -16,32 +15,18 @@ class LinterService(BaseService):
     def _setup_logger(self) -> None:
         super()._setup_logger(self.logger, "LINTER")
 
-    def _top_k_candidates(self, anchor_name, remaining, k=10):
-        anchor_desc = (self.index_map.get(anchor_name) or anchor_name).lower()
-        anchor_words = set(anchor_desc.split())
-
-        scored = []
-        for name, path in remaining.items():
-            if name == anchor_name:
-                continue
-
-            desc = (self.index_map.get(name) or name).lower()
-            words = set(desc.split())
-
-            score = len(anchor_words & words)
-
-            if score > 0:
-                scored.append((score, name, path))
-
-        scored.sort(reverse=True)
-        return dict((name, path) for score, name, path in scored[:k])
+    def _top_k_candidates(self, anchor_name: str, remaining: dict, k: int = 10) -> dict:
+        top = self._top_k_pages(
+            self.index_map.get(anchor_name) or anchor_name,
+            [n for n in remaining if n != anchor_name],
+            k
+        )
+        return {name: remaining[name] for name in top}
 
     def _clean_pages(self) -> list[dict]:
         results = []
         index = self.INDEX_PATH.read_text(encoding="utf-8")
-        for path in self.WIKI_DIR.rglob("*.md"):
-            if path.name in {"index.md", "log.md"} or path.name.startswith("_"):
-                continue
+        for name, path in self._build_file_map().items():
             original = path.read_text(encoding="utf-8").strip()
             if not original:
                 continue
@@ -53,15 +38,15 @@ class LinterService(BaseService):
                     )
                 )
             except Exception as e:
-                self.logger.error("clean_failed: %s - %s", path.stem, str(e))
-                results.append({"file": path.stem, "status": "clean_failed"})
+                self.logger.error("clean_failed: %s - %s", name, str(e))
+                results.append({"file": name, "status": "clean_failed"})
                 continue
             if cleaned.strip():
                 path.write_text(cleaned, encoding="utf-8")
-                self.logger.info("cleaned: %s", path.stem)
-                results.append({"file": path.stem, "status": "cleaned"})
+                self.logger.info("cleaned: %s", name)
+                results.append({"file": name, "status": "cleaned"})
             else:
-                results.append({"file": path.stem, "status": "skipped"})
+                results.append({"file": name, "status": "skipped"})
         return results
 
     def _merge_pages(self, all_files: dict) -> list[dict]:
@@ -77,9 +62,11 @@ class LinterService(BaseService):
                 continue
 
             anchor_text = anchor_path.read_text(encoding="utf-8")
+            merged_any = False
             for name, path in candidates.items():
                 if name not in remaining:
                     continue
+                merged_any = True
                 child_text = path.read_text(encoding="utf-8")
                 anchor_text = anchor_text.rstrip() + "\n\n---\n\n" + child_text
                 path.unlink()
@@ -88,7 +75,8 @@ class LinterService(BaseService):
                 self.logger.info("merged: %s -> %s", name, anchor_name)
                 results.append({"file": name, "status": f"merged into {anchor_name}"})
 
-            anchor_path.write_text(anchor_text, encoding="utf-8")
+            if merged_any:
+                anchor_path.write_text(anchor_text, encoding="utf-8")
 
         return results
 

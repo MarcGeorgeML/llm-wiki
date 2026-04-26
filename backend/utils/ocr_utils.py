@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import easyocr
 import os
+import logging
 
 
 from dotenv import load_dotenv
@@ -17,11 +18,12 @@ OCR_GPU = True if OCR_GPU == "true" else False
 reader = easyocr.Reader(["en"], gpu=OCR_GPU)
 
 
-class OCRService:
+class OCRService():
 
-    def extract_pdf_text(self, pdf_bytes: bytes) -> str:
+    def extract_pdf_text(self, pdf_bytes: bytes) -> tuple[str, int]:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         pages_text = []
+        failed_pages = 0
         for page in doc:
             normal = str(page.get_text()).strip()
             if normal:
@@ -42,9 +44,9 @@ class OCRService:
                 try:
                     result = reader.readtext(img_arr, detail=0)
                 except Exception as e:
-                    # log and skip OCR on this page if reader fails
+                    failed_pages += 1
                     result = []
-                    raise ValueError(f"OCR failed on page: {e}")
+                    
                 lines: list[str] = []
                 for item in result:
                     if isinstance(item, str):
@@ -54,7 +56,7 @@ class OCRService:
                 ocr = "\n".join(lines).strip()
                 if ocr:
                     pages_text.append(ocr)
-        return "\n\n---PAGE_BREAK---\n\n".join(pages_text)
+        return "\n\n---PAGE_BREAK---\n\n".join(pages_text), failed_pages
 
     def chunk_text(self, text: str, max_chars: int = 3500) -> list[str]:
         pages = text.split("\n\n---PAGE_BREAK---\n\n")

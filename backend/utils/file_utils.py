@@ -4,15 +4,16 @@ from pathlib import Path
 class FileService:
     def __init__(self, WIKI_DIR: Path):
         self.WIKI_DIR = WIKI_DIR
+        self.SESSION_DIR = WIKI_DIR / "session_001"
         self.index_map: dict[str, str] = {}
 
     @property
     def INDEX_PATH(self) -> Path:
-        return self.WIKI_DIR / "index.md"
+        return self.SESSION_DIR / "index.md"
 
     @property
     def LOG_PATH(self) -> Path:
-        return self.WIKI_DIR / "log.md"
+        return self.SESSION_DIR / "log.md"
 
     def parse_index_line(self, line: str) -> tuple[str, str] | None:
         if "[[" in line and "]] — " in line:
@@ -24,7 +25,7 @@ class FileService:
     def _build_file_map(self) -> dict[str, Path]:
         return {
             p.stem: p
-            for p in self.WIKI_DIR.rglob("*.md")
+            for p in self.SESSION_DIR.rglob("*.md")
             if p.name not in {"index.md", "log.md"} and not p.name.startswith("_")
         }
 
